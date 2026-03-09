@@ -314,3 +314,5 @@ export default function AdminDashboard() {
     </AdminLayout>
   );
 }
+
+export const getServerSideProps = () => ({ props: {} });

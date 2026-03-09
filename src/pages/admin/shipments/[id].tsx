@@ -377,3 +377,5 @@ setColor(json.color || "");
     </AdminLayout>
   );
 }
+
+export const getServerSideProps = () => ({ props: {} });
