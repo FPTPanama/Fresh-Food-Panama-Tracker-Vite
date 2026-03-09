@@ -199,7 +199,7 @@ export default function AdminDashboard() {
               : shipments.length === 0 ? <div className="tEmpty">No hay embarques.</div>
               : shipments.map((s) => (
                   <div key={s.id} className="shipRow">
-                    {/* CELDA CÓDIGO */}
+                    {/* CELDA CÓDIGO Y FECHA */}
                     <Link href={`/admin/shipments/${s.id}`} className="cell pointer-area">
                         <div className="main code">{s.code}</div>
                         <div className="sub">{fmtDate(s.created_at)}</div>
