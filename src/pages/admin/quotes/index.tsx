@@ -320,3 +320,5 @@ export default function AdminQuotesIndex() {
     </AdminLayout>
   );
 }
+
+export const getServerSideProps = () => ({ props: {} });
