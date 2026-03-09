@@ -13,7 +13,17 @@ Crea un archivo `.env.local` para desarrollo:
 ```
 NEXT_PUBLIC_SUPABASE_URL=...
 NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+SUPABASE_URL=...
 ```
+
+**Desarrollo contra deploy de Netlify:** Para que el login y los datos funcionen en local usando las funciones del sitio desplegado, añade:
+
+```
+NEXT_PUBLIC_NETLIFY_URL=https://tu-sitio.netlify.app
+```
+
+(Reemplaza con la URL real de tu sitio en Netlify)
 
 En Netlify, crea variables (Site settings → Environment variables):
 

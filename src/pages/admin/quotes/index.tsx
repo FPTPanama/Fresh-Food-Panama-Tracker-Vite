@@ -8,6 +8,7 @@ import {
   Package, ArrowRight, AlertCircle, TrendingUp, ChevronRight
 } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
+import { getApiBase } from "../../../lib/apiBase";
 import { requireAdminOrRedirect } from "../../../lib/requireAdmin";
 import { AdminLayout } from "../../../components/AdminLayout";
 import { CompactRow } from "../../../components/CompactRow";
@@ -123,7 +124,7 @@ export default function AdminQuotesIndex() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const t = new Date().getTime();
-      const url = `/.netlify/functions/listQuotes?${queryString}&t=${t}`;
+      const url = `${getApiBase()}/.netlify/functions/listQuotes?${queryString}&t=${t}`;
       const res = await fetch(url, {
         headers: { 
           Authorization: `Bearer ${session?.access_token}`,

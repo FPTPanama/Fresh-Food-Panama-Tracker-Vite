@@ -7,6 +7,7 @@ import {
   Palette, ThermometerSun, SortAsc, Truck, CheckCircle2
 } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
+import { getApiBase } from "../../../lib/apiBase";
 import { labelStatus } from "../../../lib/shipmentFlow";
 import { requireAdminOrRedirect } from "../../../lib/requireAdmin";
 import { AdminLayout } from "../../../components/AdminLayout";
@@ -81,7 +82,7 @@ export default function AdminShipments() {
     if (!session) return;
 
     const params = new URLSearchParams({ mode: 'admin', q: q.trim(), dir });
-    const res = await fetch(`/.netlify/functions/listShipments?${params.toString()}`, {
+    const res = await fetch(`${getApiBase()}/.netlify/functions/listShipments?${params.toString()}`, {
       headers: { Authorization: `Bearer ${session.access_token}` },
     });
     if (res.ok) {
@@ -131,7 +132,7 @@ export default function AdminShipments() {
         brix_grade: formData.brix_grade
       };
 
-      const response = await fetch('/.netlify/functions/createShipment', {
+      const response = await fetch(`${getApiBase()}/.netlify/functions/createShipment`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
