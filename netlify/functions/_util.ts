@@ -21,7 +21,7 @@ export const sbAdmin = createClient(supabaseUrl, supabaseServiceKey, {
 export const commonHeaders = {
   "Content-Type": "application/json",
   "Access-Control-Allow-Origin": "*", // En producción, cámbialo por tu dominio específico
-  "Access-Control-Allow-Headers": "authorization, content-type",
+  "Access-Control-Allow-Headers": "authorization, content-type, cache-control",
   "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
 };
 

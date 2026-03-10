@@ -60,6 +60,7 @@ export default function AdminQuoteDetailPage() {
   const [data, setData] = useState<any>(null);
   const [products, setProducts] = useState<any[]>([]);
   const [varieties, setVarieties] = useState<string[]>([]);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
   // ESTADOS DE LA COTIZACIÓN
   const [status, setStatus] = useState("draft");
@@ -260,6 +261,7 @@ export default function AdminQuoteDetailPage() {
 
   return (
     <AdminLayout title={`Cotización: ${headerInfo.name}`}>
+      
       <div className="ff-container">
         
         {/* HERO HEADER - CLON EXACTO DE SHIPMENTS */}
