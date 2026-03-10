@@ -1,5 +1,6 @@
 // src/lib/requireAdmin.ts
 import { supabase } from "./supabaseClient";
+import { getApiBase } from "./apiBase";
 
 type Result =
   | { ok: true; me: any }
@@ -29,7 +30,8 @@ export async function requireAdminOrRedirect(): Promise<Result> {
 
     // Intentamos primero whoami (normalmente es el que ya usaste)
     // y si no existe, caemos a getMyProfile.
-    const endpoints = ["/.netlify/functions/whoami", "/.netlify/functions/getMyProfile"];
+    const base = getApiBase();
+    const endpoints = [`${base}/.netlify/functions/whoami`, `${base}/.netlify/functions/getMyProfile`];
 
     let me: any = null;
     let lastStatus = 0;

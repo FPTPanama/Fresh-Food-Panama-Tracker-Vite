@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Search, Calendar, Package, MapPin, RefreshCcw, Plane, PlusCircle, ArrowRight, Plus, Layers } from "lucide-react";
 import { supabase } from "../../lib/supabaseClient";
+import { getApiBase } from "../../lib/apiBase";
 import { labelStatus, statusBadgeClass } from "../../lib/shipmentFlow";
 import { ClientLayout } from "../../components/ClientLayout";
 
@@ -79,7 +80,7 @@ export default function ShipmentsPage() {
     });
 
     try {
-      const res = await fetch(`/.netlify/functions/listShipments?${params.toString()}`, {
+      const res = await fetch(`${getApiBase()}/.netlify/functions/listShipments?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();

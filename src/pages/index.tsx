@@ -13,6 +13,7 @@ import {
 
 // ✅ RUTAS CORREGIDAS PARA SRC/PAGES/INDEX.TSX
 import { supabase } from "../lib/supabaseClient"; 
+import { getApiBase } from "../lib/apiBase";
 import { labelStatus, statusBadgeClass } from "../lib/shipmentFlow";
 import { ClientLayout } from "../components/ClientLayout";
 
@@ -27,7 +28,7 @@ export default function ShipmentsPage() {
       const token = sessionData?.session?.access_token;
       if (!token) return;
 
-      const res = await fetch(`/.netlify/functions/listShipments?q=${search}&destination=${destination}`, {
+      const res = await fetch(`${getApiBase()}/.netlify/functions/listShipments?q=${search}&destination=${destination}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {

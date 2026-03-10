@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { supabase } from "../lib/supabaseClient";
+import { getApiBase } from "../lib/apiBase";
 import { useUILang } from "../lib/uiLanguage";
 import {
   LayoutGrid, Package, Users, Globe, ChevronDown, LogOut, 
@@ -56,7 +57,7 @@ export function AdminLayout({ title, subtitle, children }: { title?: string; sub
     (async () => {
       const { data } = await supabase.auth.getSession();
       if (!data.session?.access_token) { router.push("/login"); return; }
-      const res = await fetch("/.netlify/functions/getMyProfile", {
+      const res = await fetch(`${getApiBase()}/.netlify/functions/getMyProfile`, {
         headers: { Authorization: `Bearer ${data.session.access_token}` },
       });
       if (res.ok) {

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { X, Save, Package, Globe, Loader2, Check, Hash, Palette, ThermometerSun, Anchor, Plane } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
+import { getApiBase } from '../lib/apiBase';
 
 interface ShipmentDrawerProps {
   isOpen: boolean;
@@ -99,7 +100,7 @@ export default function ShipmentDrawer({ isOpen, onClose, clientId, clientName, 
         brix_grade: formData.brix_grade
       };
 
-      const response = await fetch('/.netlify/functions/createShipment', {
+      const response = await fetch(`${getApiBase()}/.netlify/functions/createShipment`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',

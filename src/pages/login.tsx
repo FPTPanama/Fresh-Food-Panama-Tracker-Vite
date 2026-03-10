@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
+import { getApiBase } from "../lib/apiBase";
 import { LogIn, ShieldCheck, CheckCircle2, Eye, EyeOff } from "lucide-react";
 
 type Role = "client" | "admin" | "superadmin" | null;
@@ -19,7 +20,7 @@ export default function LoginPage() {
     const token = data.session?.access_token;
     if (!token) return false;
 
-    const res = await fetch("/.netlify/functions/whoami", {
+    const res = await fetch(`${getApiBase()}/.netlify/functions/whoami`, {
       headers: { Authorization: `Bearer ${token}` },
     });
 

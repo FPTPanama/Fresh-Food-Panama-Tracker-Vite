@@ -2,6 +2,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, LogOut, Package, Users } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import { getApiBase } from "../lib/apiBase";
 
 type Role = "client" | "admin" | "superadmin" | null;
 
@@ -40,7 +41,7 @@ export function AppHeader({ variant }: { variant: "client" | "admin" }) {
         return;
       }
 
-      const res = await fetch("/.netlify/functions/whoami", {
+      const res = await fetch(`${getApiBase()}/.netlify/functions/whoami`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
