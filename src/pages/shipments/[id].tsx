@@ -300,6 +300,7 @@ export default function ShipmentDetailPage() {
               key={p.id || idx} 
               className={`ff-thumb ${idx === activePhotoIdx ? 'active' : ''}`} 
               onClick={() => setActivePhotoIdx(idx)}
+              onMouseEnter={() => setActivePhotoIdx(idx)}
             >
               <img src={p.url || ''} alt="thumb" />
             </div>
