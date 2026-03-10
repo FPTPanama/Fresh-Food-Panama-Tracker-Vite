@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { supabase } from "../lib/supabaseClient";
+import { getApiBase } from "../lib/apiBase";
 import { useUILang } from "../lib/uiLanguage";
 import { Package, Globe, ChevronDown, LogOut, UserCircle2 } from "lucide-react";
 
@@ -72,7 +73,7 @@ export function ClientLayout({
       const token = await getTokenOrRedirect();
       if (!token) return;
 
-      const res = await fetch("/.netlify/functions/getMyProfile", {
+      const res = await fetch(`${getApiBase()}/.netlify/functions/getMyProfile`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return;
