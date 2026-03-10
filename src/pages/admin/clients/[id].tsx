@@ -170,7 +170,7 @@ export default function ClientDetailPage() {
                   <div className="ff-icon-circle"><Building2 size={18} /></div>
                   <div className="ff-header-text-group">
                     <h3>Datos del Cliente</h3>
-                    <p>Información legal y términos comerciales</p>
+                    <p>Información legal y términos comerciales.</p>
                   </div>
                 </div>
                 {!isEditingMaster ? (
