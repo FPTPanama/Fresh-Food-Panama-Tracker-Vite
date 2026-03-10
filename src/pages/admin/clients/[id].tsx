@@ -424,3 +424,5 @@ export default function ClientDetailPage() {
     </AdminLayout>
   );
 }
+
+export const getServerSideProps = () => ({ props: {} });

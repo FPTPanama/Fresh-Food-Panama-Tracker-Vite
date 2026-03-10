@@ -6,6 +6,7 @@ import {
   Pencil
 } from "lucide-react";
 import { supabase } from "../../lib/supabaseClient";
+import { getApiBase } from "../../lib/apiBase";
 import { AdminLayout, notify } from "../../components/AdminLayout";
 
 // --- HELPERS SENIOR ---
@@ -45,7 +46,8 @@ export default function AdminUsersPage() {
     setLoading(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const endpoint = activeTab === 'clients' ? '/.netlify/functions/listClients' : '/.netlify/functions/listUsers';
+      const base = getApiBase();
+      const endpoint = activeTab === 'clients' ? `${base}/.netlify/functions/listClients` : `${base}/.netlify/functions/listUsers`;
       const res = await fetch(endpoint, { headers: { Authorization: `Bearer ${session?.access_token}` } });
       const data = await res.json();
       setDataList(data.items || []);
@@ -81,7 +83,7 @@ export default function AdminUsersPage() {
       const { data: { session } } = await supabase.auth.getSession();
       
       // 2. Llamada a createClient (La función de Netlify que analizamos)
-      const res = await fetch('/.netlify/functions/createClient', {
+      const res = await fetch(`${getApiBase()}/.netlify/functions/createClient`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
         body: JSON.stringify({ ...f, logo_url: finalLogoUrl })

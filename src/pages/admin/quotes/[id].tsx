@@ -488,3 +488,5 @@ export default function AdminQuoteDetailPage() {
     </AdminLayout>
   );
 }
+
+export const getServerSideProps = () => ({ props: {} });

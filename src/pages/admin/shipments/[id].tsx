@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { supabase } from "../../../lib/supabaseClient";
+import { getApiBase } from "../../../lib/apiBase";
 import { requireAdminOrRedirect } from "../../../lib/requireAdmin";
 import { AdminLayout } from "../../../components/AdminLayout";
 import { labelStatus } from "../../../lib/shipmentFlow";
@@ -92,7 +93,7 @@ export default function AdminShipmentDetail() {
     setLoading(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const res = await fetch(`/.netlify/functions/getShipment?id=${shipmentId}&mode=admin`, {
+      const res = await fetch(`${getApiBase()}/.netlify/functions/getShipment?id=${shipmentId}&mode=admin`, {
         headers: { Authorization: `Bearer ${session?.access_token}` }
       });
       if (!res.ok) throw new Error("Fetch error");
@@ -136,7 +137,7 @@ setColor(json.color || "");
     setBusy(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const res = await fetch("/.netlify/functions/updateMilestone", {
+      const res = await fetch(`${getApiBase()}/.netlify/functions/updateMilestone`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
         body: JSON.stringify({
@@ -169,7 +170,7 @@ setColor(json.color || "");
       const token = session?.access_token;
       const bucket = kind === "doc" ? "shipment-docs" : "shipment-photos";
 
-      const resUrl = await fetch("/.netlify/functions/getUploadUrl", {
+      const resUrl = await fetch(`${getApiBase()}/.netlify/functions/getUploadUrl`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ bucket, shipmentCode: data.code, filename: file.name }),
@@ -178,7 +179,7 @@ setColor(json.color || "");
 
       await fetch(uploadUrl, { method: "PUT", body: file });
       
-      await fetch("/.netlify/functions/registerFile", {
+      await fetch(`${getApiBase()}/.netlify/functions/registerFile`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -200,7 +201,7 @@ setColor(json.color || "");
     setBusy(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      await fetch("/.netlify/functions/deleteFile", {
+      await fetch(`${getApiBase()}/.netlify/functions/deleteFile`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
         body: JSON.stringify({ fileId, shipmentId: data?.id }),
@@ -214,7 +215,7 @@ setColor(json.color || "");
 
   async function download(fileId: string) {
     const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch(`/.netlify/functions/getDownloadUrl?fileId=${fileId}`, {
+    const res = await fetch(`${getApiBase()}/.netlify/functions/getDownloadUrl?fileId=${fileId}`, {
       headers: { Authorization: `Bearer ${session?.access_token}` }
     });
     const { url } = await res.json();
@@ -377,3 +378,5 @@ setColor(json.color || "");
     </AdminLayout>
   );
 }
+
+export const getServerSideProps = () => ({ props: {} });

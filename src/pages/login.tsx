@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
-import { LogIn, ShieldCheck, CheckCircle2 } from "lucide-react";
+import { getApiBase } from "../lib/apiBase";
+import { LogIn, ShieldCheck, CheckCircle2, Eye, EyeOff } from "lucide-react";
 
 type Role = "client" | "admin" | "superadmin" | null;
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [checking, setChecking] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -18,7 +20,7 @@ export default function LoginPage() {
     const token = data.session?.access_token;
     if (!token) return false;
 
-    const res = await fetch("/.netlify/functions/whoami", {
+    const res = await fetch(`${getApiBase()}/.netlify/functions/whoami`, {
       headers: { Authorization: `Bearer ${token}` },
     });
 
@@ -131,13 +133,24 @@ export default function LoginPage() {
 
             <div className="ff-input-group">
               <label>Contraseña</label>
-              <input
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                type="password"
-                placeholder="••••••••"
-                required
-              />
+              <div className="ff-password-wrap">
+                <input
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  type={showPassword ? "text" : "password"}
+                  placeholder="••••••••"
+                  required
+                />
+                <button
+                  type="button"
+                  className="ff-password-toggle"
+                  onClick={() => setShowPassword((v) => !v)}
+                  title={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                  aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
             </div>
 
             {error && <div className="ff-error-msg">{error}</div>}
@@ -226,6 +239,21 @@ export default function LoginPage() {
         .ff-login-form { width: 100%; text-align: left; }
         .ff-input-group { margin-bottom: 20px; }
         .ff-input-group label { display: block; font-size: 11px; font-weight: 700; color: ${FF_DARK_GREEN}; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.05em; }
+        .ff-password-wrap { position: relative; display: flex; align-items: center; }
+        .ff-password-toggle {
+          position: absolute;
+          right: 12px;
+          background: none;
+          border: none;
+          padding: 4px;
+          cursor: pointer;
+          color: #94a3b8;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 6px;
+        }
+        .ff-password-toggle:hover { color: ${FF_DARK_GREEN}; }
         .ff-input-group input {
           width: 100%;
           padding: 14px 18px;
@@ -236,6 +264,7 @@ export default function LoginPage() {
           font-size: 14px;
           transition: 0.2s;
         }
+        .ff-password-wrap input { padding-right: 48px; }
         .ff-input-group input:focus { border-color: ${FF_DARK_GREEN}; background: white; outline: none; box-shadow: 0 0 0 4px rgba(35, 77, 35, 0.06); }
 
         .ff-error-msg { background: #fff5f5; border: 1px solid #fed7d7; color: #c53030; padding: 12px; border-radius: 10px; font-size: 12px; margin-bottom: 20px; font-weight: 600; width: 100%; }

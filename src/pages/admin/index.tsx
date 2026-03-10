@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import { supabase } from "../../lib/supabaseClient";
+import { getApiBase } from "../../lib/apiBase";
 import { AdminLayout } from "../../components/AdminLayout";
 import { labelStatus } from "../../lib/shipmentFlow";
 
@@ -142,8 +143,9 @@ export default function AdminDashboard() {
       const token = await getAccessTokenOnce(tokenRef);
       if (!token) return;
 
-      const shipmentsUrl = `/.netlify/functions/listShipments?page=1&dir=desc&mode=admin`;
-      const clientsUrl = `/.netlify/functions/listClients`;
+      const base = getApiBase();
+      const shipmentsUrl = `${base}/.netlify/functions/listShipments?page=1&dir=desc&mode=admin`;
+      const clientsUrl = `${base}/.netlify/functions/listClients`;
 
       const [sRes, cRes] = await Promise.allSettled([
         fetchJsonWithTimeout<ShipmentsApiResponse>(shipmentsUrl, token),
@@ -314,3 +316,5 @@ export default function AdminDashboard() {
     </AdminLayout>
   );
 }
+
+export const getServerSideProps = () => ({ props: {} });

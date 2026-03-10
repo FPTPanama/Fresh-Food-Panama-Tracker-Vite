@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
 import { supabase } from "../../lib/supabaseClient";
-
+import { getApiBase } from "../../lib/apiBase";
 import { ClientLayout } from "../../components/ClientLayout";
 import { ProgressStepper } from "../../components/ProgressStepper";
 import { Timeline as ModernTimeline } from "../../components/Timeline";
@@ -151,7 +151,7 @@ export default function ShipmentDetailPage() {
         return; 
       }
 
-      const res = await fetch(`/.netlify/functions/getShipment?id=${encodeURIComponent(shipmentId)}`, {
+      const res = await fetch(`${getApiBase()}/.netlify/functions/getShipment?id=${encodeURIComponent(shipmentId)}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -174,7 +174,7 @@ export default function ShipmentDetailPage() {
   async function download(fileId: string) {
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData.session?.access_token;
-    const res = await fetch(`/.netlify/functions/getDownloadUrl?fileId=${encodeURIComponent(fileId)}`, {
+    const res = await fetch(`${getApiBase()}/.netlify/functions/getDownloadUrl?fileId=${encodeURIComponent(fileId)}`, {
         headers: { Authorization: `Bearer ${token}` }
     });
     const { url } = await res.json();
