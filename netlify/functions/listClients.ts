@@ -6,8 +6,18 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+const corsHeaders = {
+  "Content-Type": "application/json",
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type, Cache-Control",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+};
+
 export const handler: Handler = async (event) => {
-  if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
+  if (event.httpMethod === "OPTIONS") {
+    return { statusCode: 204, headers: corsHeaders, body: "" };
+  }
+  if (event.httpMethod !== 'GET') return { statusCode: 405, headers: corsHeaders, body: 'Method Not Allowed' };
 
   try {
     const { data, error } = await supabase
@@ -30,15 +40,13 @@ export const handler: Handler = async (event) => {
 
     return {
       statusCode: 200,
-      headers: { 
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*" 
-      },
+      headers: corsHeaders,
       body: JSON.stringify({ items: data || [] }),
     };
   } catch (error: any) {
     return {
       statusCode: 500,
+      headers: corsHeaders,
       body: JSON.stringify({ message: error.message }),
     };
   }

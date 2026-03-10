@@ -10,5 +10,12 @@
     "public/brand/**"
   ]
 
+[[headers]]
+  for = "/.netlify/functions/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Headers = "Authorization, Content-Type, Cache-Control"
+    Access-Control-Allow-Methods = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+
 [[plugins]]
   package = "@netlify/plugin-nextjs"
