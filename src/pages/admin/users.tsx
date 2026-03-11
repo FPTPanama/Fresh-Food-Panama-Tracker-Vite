@@ -45,56 +45,32 @@ export default function AdminUsersPage() {
 
   // --- CARGA DE DATOS ---
   const loadData = async () => {
-    console.log("⚛️ [DEBUG] Iniciando loadData...");
     setLoading(true);
-    
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      
-      // Si no hay sesión, avisamos en consola
-      if (!session) {
-        console.warn("⚠️ [DEBUG] No hay sesión activa en Supabase");
-      }
+      if (!session) return;
 
       const base = getApiBase();
-      const endpoint = activeTab === 'clients' 
-        ? `${base}/.netlify/functions/listClients` 
+      const endpoint = activeTab === 'clients'
+        ? `${base}/.netlify/functions/listClients`
         : `${base}/.netlify/functions/listUsers`;
-      
-      console.log(`📡 [DEBUG] Fetching a: ${endpoint}`);
 
-      const res = await fetch(endpoint, { 
-        headers: { 
-          'Authorization': `Bearer ${session?.access_token}`,
-          'Content-Type': 'application/json'
-        } 
+      const res = await fetch(endpoint, {
+        headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
       });
 
-      console.log(`📊 [DEBUG] Status respuesta: ${res.status}`);
-
-      if (!res.ok) {
-        throw new Error(`Error HTTP: ${res.status}`);
-      }
-
+      if (!res.ok) throw new Error(`Error HTTP: ${res.status}`);
       const data = await res.json();
-      console.log("✅ [DEBUG] Datos recibidos:", data);
-
-      // Usamos el operador opcional ?. por si data es null
       setDataList(data?.items || []);
-
-    } catch (err: any) { 
-      // Usamos 'err: any' para que VS Code no se queje del tipo de error
-      console.error("❌ [DEBUG] Fallo fatal:", err.message);
-      
-      // Verificamos que notify exista antes de llamarla
-      if (typeof notify === 'function') {
-        notify(err.message || "Error de conexión", "error"); 
-      }
-    } finally { 
-      setLoading(false); 
-      console.log("🏁 [DEBUG] loadData finalizado.");
+    } catch (err: any) {
+      console.error("Error cargando datos:", err.message);
+      if (typeof notify === 'function') notify(err.message || "Error de conexión", "error");
+    } finally {
+      setLoading(false);
     }
   };
+
+  useEffect(() => { loadData(); }, [activeTab]);
 
   const filteredData = useMemo(() => {
     return dataList.filter(item => {

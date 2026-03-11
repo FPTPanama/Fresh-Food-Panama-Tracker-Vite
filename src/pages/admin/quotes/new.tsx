@@ -74,7 +74,7 @@ export default function AdminQuoteNew() {
       });
       const dataJson = await res.json();
       const items: ClientItem[] = Array.isArray(dataJson) ? dataJson : (dataJson.items || []);
-      
+
       setClients(items);
       if (items.length > 0) setSelectedClientId(items[0].id);
     } catch (e) {
