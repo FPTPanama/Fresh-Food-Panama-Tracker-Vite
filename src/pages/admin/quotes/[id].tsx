@@ -5,6 +5,7 @@ import {
   Thermometer, Droplets, Calculator, MapPin, Shield, ArrowRight, Package 
 } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
+import { getApiBase } from "../../../lib/apiBase";
 import { requireAdminOrRedirect } from "../../../lib/requireAdmin";
 import { AdminLayout } from "../../../components/AdminLayout";
 import { LocationSelector } from "../../../components/LocationSelector";
@@ -63,8 +64,22 @@ export default function AdminQuoteDetailPage() {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const handleDownloadPdf = async () => {
   if (!id) return;
-  // Esto abre la Netlify Function que ya tienes creada
-  window.open(`/api/renderQuotePdf?id=${id}`, '_blank');
+
+  // 1. Extraemos la sesión activa de Supabase
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
+
+  if (!token) {
+    alert(" Tu sesión ha expirado. Por favor, recarga la página o inicia sesión de nuevo.");
+    return;
+  }
+
+  // 2. Construimos la URL pasando el TOKEN como parámetro
+  // Esto permite que la pestaña nueva se identifique ante Netlify
+  const url = `${getApiBase()}/.netlify/functions/renderQuotePdf?id=${id}&token=${token}&lang=es&variant=2`;
+  
+  // 3. Abrimos la pestaña
+  window.open(url, '_blank');
 };
 
   // ESTADOS DE LA COTIZACIÓN
@@ -195,72 +210,63 @@ export default function AdminQuoteDetailPage() {
   };
 
  async function handleSave() {
-  if (!id) return;
-  setBusy(true);
+    if (!id) return;
+    setBusy(true);
 
-  try {
-    // 1. CÁLCULO DEL TOTAL (Sumando lo que el cliente va a pagar)
-    // Usamos los nombres que vienen de tu estado de React: costs.categoria.unitSale
-    const totalVentaCientifico = 
-      Number(costs.fruta?.unitSale || 0) +
-      Number(costs.flete?.unitSale || 0) +
-      Number(costs.origen?.unitSale || 0) +
-      Number(costs.aduana?.unitSale || 0) +
-      Number(costs.inspeccion?.unitSale || 0) +
-      Number(costs.itbms?.unitSale || 0) +
-      Number(costs.handling?.unitSale || 0) +
-      Number(costs.otros?.unitSale || 0);
+    try {
+      const totalVentaCientifico = 
+        Number(costs.fruta?.unitSale || 0) +
+        Number(costs.flete?.unitSale || 0) +
+        Number(costs.origen?.unitSale || 0) +
+        Number(costs.aduana?.unitSale || 0) +
+        Number(costs.inspeccion?.unitSale || 0) +
+        Number(costs.itbms?.unitSale || 0) +
+        Number(costs.handling?.unitSale || 0) +
+        Number(costs.otros?.unitSale || 0);
 
-    const payload = {
-      // CAMPOS DE TEXTO Y LOGÍSTICA
-      terms: incoterm, 
-      currency: data?.currency || 'USD', 
-      status: status,
-      mode: mode,
-      destination: place,
-      boxes: Number(boxes),
-      weight_kg: Number(weightKg),
-      
-      // EL TOTAL PARA EL INDEX
-      total: totalVentaCientifico, 
+      const payload = {
+        total: totalVentaCientifico, 
+        status,
+        mode,
+        destination: place,
+        boxes: Number(boxes),
+        weight_kg: Number(weightKg),
+        costs: {
+          c_fruit: Number(costs.fruta.base), s_fruit: Number(costs.fruta.unitSale),
+          c_freight: Number(costs.flete.base), s_freight: Number(costs.flete.unitSale),
+          c_origin: Number(costs.origen.base), s_origin: Number(costs.origen.unitSale),
+          c_aduana: Number(costs.aduana.base), s_aduana: Number(costs.aduana.unitSale),
+          c_insp: Number(costs.inspeccion.base), s_insp: Number(costs.inspeccion.unitSale),
+          c_itbms: Number(costs.itbms.base), s_itbms: Number(costs.itbms.unitSale),
+          c_handling: Number(costs.handling.base), s_handling: Number(costs.handling.unitSale),
+          c_other: Number(costs.otros.base), s_other: Number(costs.otros.unitSale)
+        },
+        totals: {
+          total: totalVentaCientifico,
+          items: [
+            { name: "Fruta / Fruit", total: Number(costs.fruta.unitSale) },
+            { name: "Flete / Freight", total: Number(costs.flete.unitSale) },
+            { name: "Gastos Origen / Origin Costs", total: Number(costs.origen.unitSale) },
+            { name: "Gastos Aduana / Customs", total: Number(costs.aduana.unitSale) },
+            { name: "Manejo / Handling", total: Number(costs.handling.unitSale) },
+            { name: "Otros / Others", total: Number(costs.otros.unitSale) }
+          ].filter(it => it.total > 0),
+          meta: { incoterm, place }
+        },
+        product_id: productId && productId !== "" ? productId : null,
+        product_details: { variety, color, brix }
+      };
 
-      // OBJETO JSONB (Mapeado a los nombres s_ y c_ que verificamos en la DB)
-      costs: {
-        c_fruit: Number(costs.fruta.base),
-        s_fruit: Number(costs.fruta.unitSale),
-        c_freight: Number(costs.flete.base),
-        s_freight: Number(costs.flete.unitSale),
-        c_origin: Number(costs.origen.base),
-        s_origin: Number(costs.origen.unitSale),
-        c_aduana: Number(costs.aduana.base),
-        s_aduana: Number(costs.aduana.unitSale),
-        c_insp: Number(costs.inspeccion.base),
-        s_insp: Number(costs.inspeccion.unitSale),
-        c_itbms: Number(costs.itbms.base),
-        s_itbms: Number(costs.itbms.unitSale),
-        c_handling: Number(costs.handling.base),
-        s_handling: Number(costs.handling.unitSale),
-        c_other: Number(costs.otros.base),
-        s_other: Number(costs.otros.unitSale)
-      },
-      product_id: productId && productId !== "" ? productId : null,
-      product_details: { variety, color, brix }
-    };
-
-    const { error } = await supabase.from("quotes").update(payload).eq("id", id);
-    if (error) throw error;
-    
-    setToast("Guardado con éxito");
-    // Forzamos regreso al index para ver el nuevo total
-    setTimeout(() => router.push('/admin/quotes'), 1500);
-
-  } catch (err) {
-    console.error("Error:", err.message);
-    setToast("Error: " + err.message);
-  } finally {
-    setBusy(false);
-  }
-}
+      const { error } = await supabase.from("quotes").update(payload).eq("id", id);
+      if (error) throw error;
+      setToast("¡Cotización guardada!");
+    } catch (err: any) {
+      console.error(err);
+      setToast("Error al guardar");
+    } finally {
+      setBusy(false);
+    }
+  } // <--- AQUÍ SE CIERRA handleSave
 
   if (loading) return <AdminLayout title="Cargando..."><div className="p-10">Cargando...</div></AdminLayout>;
 
@@ -294,10 +300,7 @@ export default function AdminQuoteDetailPage() {
                   <span className="kpi-lab">PRECIO POR CAJA</span>
                </div>
                <div className="head-actions">
-   <div className="kpi-box">
-      <span className="kpi-val">USD {analysis.perBox.toFixed(2)}</span>
-      <span className="kpi-lab">PRECIO POR CAJA</span>
-   </div>
+
 
    {/* --- PEGA ESTO AQUÍ --- */}
    <button 
@@ -326,11 +329,7 @@ export default function AdminQuoteDetailPage() {
      {busy ? 'Guardando...' : 'Guardar'}
    </button>
 </div>
-               <button className="btn-save" onClick={handleSave} disabled={busy}>
-                 {busy ? <Loader2 size={18} className="spin"/> : <Save size={18}/>}
-                 {busy ? 'Guardando...' : 'Guardar'}
-               </button>
-            </div>
+</div>
             {/* Pill de Ruta - AHORA REACTIVO AL SELECTOR DE ABAJO */}
 <span className="pill green">
   <MapPin size={14}/> 
@@ -525,8 +524,8 @@ export default function AdminQuoteDetailPage() {
         .spin { animation: spin 1s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
-    </AdminLayout>
-  );
-}
+  </AdminLayout>
+  ); 
+} 
 
-export const getServerSideProps = () => ({ props: {} });
+export const getServerSideProps = () => ({ props: {} })

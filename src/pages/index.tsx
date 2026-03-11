@@ -28,7 +28,7 @@ export default function ShipmentsPage() {
       const token = sessionData?.session?.access_token;
       if (!token) return;
 
-      const res = await fetch(`${getApiBase()}/.netlify/functions/listShipments?q=${search}&destination=${destination}`, {
+      const res = await fetch(`${getApiBase()}/.netlify/functions/listShipments?q=${encodeURIComponent(search)}&destination=${encodeURIComponent(destination)}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {

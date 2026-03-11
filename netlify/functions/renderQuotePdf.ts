@@ -147,7 +147,13 @@ function drawItemsTable(doc: any, opts: any) {
 // --- HANDLER PRINCIPAL ---
 export const handler: Handler = async (event) => {
   try {
-    if (event.httpMethod === "OPTIONS") return json(200, { ok: true });
+    // --- PARCHE DE IDENTIDAD PARA PESTAÑAS NUEVAS ---
+    // Si el token viene en la URL, lo movemos al header para que los utils lo reconozcan
+    const tokenFromUrl = event.queryStringParameters?.token;
+    if (tokenFromUrl) {
+      event.headers.authorization = `Bearer ${tokenFromUrl}`;
+    }
+    // ------------------------------------------------
 
     const { user, profile } = await getUserAndProfile(event);
     if (!user || !profile || !isPrivilegedRole(profile.role || "")) return text(401, "Unauthorized");
@@ -167,8 +173,8 @@ export const handler: Handler = async (event) => {
 
     // Diagnóstico de Rutas para Netlify
     const brandDir = path.join(process.cwd(), "public", "brand");
-    const logoBuf = readIfExists(path.join(brandDir, "freshfood_logo.png"));
-    const wmBuf = readIfExists(path.join(brandDir, "FFPWM.png"));
+const logoBuf = readIfExists(path.join(brandDir, "freshfood_logo.png"));
+const wmBuf = readIfExists(path.join(brandDir, "FFPWM.png"));
     const interRegularBuf = readIfExists(path.join(brandDir, "Inter-Regular.ttf"));
     const interBoldBuf = readIfExists(path.join(brandDir, "Inter-Bold.ttf"));
 

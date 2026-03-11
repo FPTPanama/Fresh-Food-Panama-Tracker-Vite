@@ -1,13 +1,12 @@
-// netlify/functions/_util.ts
 import { createClient } from "@supabase/supabase-js";
 import type { HandlerEvent } from "@netlify/functions";
 
-// 1. Inicialización Singleton: Se ejecuta una sola vez al levantar el contenedor de la función
+// 1. Inicialización Singleton con Service Role (Uso interno de funciones)
 const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
 if (!supabaseUrl || !supabaseServiceKey) {
-  console.error("Faltan variables de entorno de Supabase.");
+  console.error("Faltan variables de entorno de Supabase en las funciones.");
 }
 
 export const sbAdmin = createClient(supabaseUrl, supabaseServiceKey, {
@@ -17,14 +16,16 @@ export const sbAdmin = createClient(supabaseUrl, supabaseServiceKey, {
   },
 });
 
-// 2. Utilidades de Respuesta (incluye cache-control para CORS desde localhost)
+// 2. Encabezados Globales (Soluciona CORS desde localhost y otros orígenes)
 export const commonHeaders = {
   "Content-Type": "application/json",
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, content-type, cache-control",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type, Cache-Control, X-Requested-With, Accept",
   "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+  "Access-Control-Max-Age": "86400",
 };
 
+// 3. Funciones de Respuesta Estándar
 export function json(statusCode: number, body: any) {
   return {
     statusCode,
@@ -41,7 +42,7 @@ export function text(statusCode: number, message: string) {
   };
 }
 
-// 3. Lógica de Autenticación y Perfil
+// 4. Lógica de Autenticación y Perfil
 export function getBearerToken(event: HandlerEvent) {
   const h = event.headers.authorization || event.headers.Authorization;
   if (!h) return null;
@@ -58,9 +59,11 @@ export async function getUserAndProfile(event: HandlerEvent) {
   if (!token) return { token: null, user: null, profile: null };
 
   try {
+    // Verificamos el token con Supabase Auth
     const { data: authData, error: authError } = await sbAdmin.auth.getUser(token);
     if (authError || !authData?.user) return { token, user: null, profile: null };
 
+    // Buscamos el perfil asociado en la tabla pública de perfiles
     const { data: profile, error: pErr } = await sbAdmin
       .from("profiles")
       .select("user_id, role, client_id")
@@ -69,11 +72,11 @@ export async function getUserAndProfile(event: HandlerEvent) {
 
     if (pErr) throw pErr;
 
-    const normalizedProfile = profile
-      ? { ...profile, role: normRole(profile.role) }
-      : null;
-
-    return { token, user: authData.user, profile: normalizedProfile };
+    return { 
+      token, 
+      user: authData.user, 
+      profile: profile ? { ...profile, role: normRole(profile.role) } : null 
+    };
   } catch (err) {
     console.error("Error en getUserAndProfile:", err);
     return { token, user: null, profile: null };

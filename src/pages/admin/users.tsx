@@ -9,6 +9,8 @@ import { supabase } from "../../lib/supabaseClient";
 import { getApiBase } from "../../lib/apiBase";
 import { AdminLayout, notify } from "../../components/AdminLayout";
 
+
+
 // --- HELPERS SENIOR ---
 const getInitials = (name: string) => name?.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2) || "??";
 
@@ -43,19 +45,56 @@ export default function AdminUsersPage() {
 
   // --- CARGA DE DATOS ---
   const loadData = async () => {
+    console.log("⚛️ [DEBUG] Iniciando loadData...");
     setLoading(true);
+    
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const base = getApiBase();
-      const endpoint = activeTab === 'clients' ? `${base}/.netlify/functions/listClients` : `${base}/.netlify/functions/listUsers`;
-      const res = await fetch(endpoint, { headers: { Authorization: `Bearer ${session?.access_token}` } });
-      const data = await res.json();
-      setDataList(data.items || []);
-    } catch (e) { notify("Error de conexión", "error"); }
-    finally { setLoading(false); }
-  };
+      
+      // Si no hay sesión, avisamos en consola
+      if (!session) {
+        console.warn("⚠️ [DEBUG] No hay sesión activa en Supabase");
+      }
 
-  useEffect(() => { loadData(); }, [activeTab]);
+      const base = getApiBase();
+      const endpoint = activeTab === 'clients' 
+        ? `${base}/.netlify/functions/listClients` 
+        : `${base}/.netlify/functions/listUsers`;
+      
+      console.log(`📡 [DEBUG] Fetching a: ${endpoint}`);
+
+      const res = await fetch(endpoint, { 
+        headers: { 
+          'Authorization': `Bearer ${session?.access_token}`,
+          'Content-Type': 'application/json'
+        } 
+      });
+
+      console.log(`📊 [DEBUG] Status respuesta: ${res.status}`);
+
+      if (!res.ok) {
+        throw new Error(`Error HTTP: ${res.status}`);
+      }
+
+      const data = await res.json();
+      console.log("✅ [DEBUG] Datos recibidos:", data);
+
+      // Usamos el operador opcional ?. por si data es null
+      setDataList(data?.items || []);
+
+    } catch (err: any) { 
+      // Usamos 'err: any' para que VS Code no se queje del tipo de error
+      console.error("❌ [DEBUG] Fallo fatal:", err.message);
+      
+      // Verificamos que notify exista antes de llamarla
+      if (typeof notify === 'function') {
+        notify(err.message || "Error de conexión", "error"); 
+      }
+    } finally { 
+      setLoading(false); 
+      console.log("🏁 [DEBUG] loadData finalizado.");
+    }
+  };
 
   const filteredData = useMemo(() => {
     return dataList.filter(item => {

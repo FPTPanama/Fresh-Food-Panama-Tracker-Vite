@@ -69,19 +69,20 @@ export default function ClientDetailPage() {
   const saveMasterData = async () => {
     try {
       const payload = {
-        name: editData.name || null,
-        legal_name: editData.legal_name || null,
-        tax_id: editData.tax_id || null,
-        website: editData.website || null,
-        country: editData.country || null,
-        city: editData.city || null,
-        phone: editData.phone || null,
-        contact_name: editData.contact_name || null,
-        contact_email: editData.contact_email || null,
-        default_incoterm: editData.default_incoterm || null,
-        credit_days: editData.credit_days ? parseInt(editData.credit_days) : 0,
-        sales_rep: editData.sales_rep || null
-      };
+      name: editData.name || null,
+      legal_name: editData.legal_name || null,
+      tax_id: editData.tax_id || null,
+      address: editData.address || null,         // <--- CAMPO NUEVO PARA DIRECCIÓN
+      city: editData.city || null,               // <--- UBICACIÓN
+      country: editData.country || null,         // <--- UBICACIÓN
+      website: editData.website || null,
+      phone: editData.phone || null,
+      contact_name: editData.contact_name || null,
+      contact_email: editData.contact_email || null,
+      default_incoterm: editData.default_incoterm || null,
+      credit_days: editData.credit_days ? parseInt(editData.credit_days) : 0,
+      sales_rep: editData.sales_rep || null
+    };
       const { error } = await supabase.from('clients').update(payload).eq('id', id);
       if (error) throw error;
       setClient({...editData});
@@ -165,56 +166,107 @@ export default function ClientDetailPage() {
           <div className="main-col">
             {/* DATOS MAESTROS */}
             <section className="pro-card">
-              <div className="card-header-v2">
-                <div className="header-title-group">
-                  <div className="ff-icon-circle"><Building2 size={18} /></div>
-                  <div className="ff-header-text-group">
-                    <h3>Datos del Cliente</h3>
-                    <p>Información legal y términos comerciales.</p>
-                  </div>
-                </div>
-                {!isEditingMaster ? (
-                  <button className="ff-btn-edit-main" onClick={() => setIsEditingMaster(true)}>
-                    <Pencil size={14} /> <span>Editar Perfil</span>
-                  </button>
-                ) : (
-                  <div className="ff-edit-group">
-                    <button className="ff-btn-save" onClick={saveMasterData}><Save size={14}/> <span>Guardar</span></button>
-                    <button className="ff-btn-cancel" onClick={() => { setIsEditingMaster(false); setEditData(client); }}>Cancelar</button>
-                  </div>
-                )}
-              </div>
-              <div className="ff-master-grid">
-                {[
-                  { label: 'Nombre Comercial', key: 'name' },
-                  { label: 'Razón Social', key: 'legal_name' },
-                  { label: 'Tax ID (RUC)', key: 'tax_id' },
-                  { label: 'Sitio Web', key: 'website' },
-                  { label: 'País', key: 'country' },
-                  { label: 'Ciudad', key: 'city' },
-                  { label: 'Teléfono', key: 'phone' },
-                  { label: 'Contacto Principal', key: 'contact_name' },
-                  { label: 'Email Notificaciones', key: 'contact_email' },
-                  { label: 'Incoterm Default', key: 'default_incoterm' },
-                  { label: 'Días de Crédito', key: 'credit_days' },
-                  { label: 'Vendedor', key: 'sales_rep' }
-                ].map((item) => (
-                  <div className="ff-master-item" key={item.key}>
-                    <span className="ff-item-label">{item.label}</span>
-                    {isEditingMaster ? (
-                      <input 
-                        className="ff-master-input"
-                        type={item.key === 'credit_days' ? 'number' : 'text'}
-                        value={editData[item.key] || ''} 
-                        onChange={e => setEditData({...editData, [item.key]: e.target.value})}
-                      />
-                    ) : (
-                      <div className="ff-item-value">{client[item.key] || '—'}</div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </section>
+  <div className="card-header-v2">
+    <div className="header-title-group">
+      <div className="ff-icon-circle"><Building2 size={18} /></div>
+      <div className="ff-header-text-group">
+        <h3>Datos del Cliente</h3>
+        <p>Información legal y términos comerciales.</p>
+      </div>
+    </div>
+    {!isEditingMaster ? (
+      <button className="ff-btn-edit-main" onClick={() => setIsEditingMaster(true)}>
+        <Pencil size={14} /> <span>Editar Perfil</span>
+      </button>
+    ) : (
+      <div className="ff-edit-group">
+        <button className="ff-btn-save" onClick={saveMasterData}><Save size={14}/> <span>Guardar</span></button>
+        <button className="ff-btn-cancel" onClick={() => { setIsEditingMaster(false); setEditData(client); }}>Cancelar</button>
+      </div>
+    )}
+  </div>
+
+  <div className="ff-master-grid">
+    {/* 1. Datos de Identificación (Fila superior) */}
+    {[
+      { label: 'Nombre Comercial', key: 'name' },
+      { label: 'Razón Social', key: 'legal_name' },
+      { label: 'Tax ID (RUC)', key: 'tax_id' }
+    ].map((item) => (
+      <div className="ff-master-item" key={item.key}>
+        <span className="ff-item-label">{item.label}</span>
+        {isEditingMaster ? (
+          <input 
+            className="ff-master-input"
+            value={editData[item.key] || ''} 
+            onChange={e => setEditData({...editData, [item.key]: e.target.value})}
+          />
+        ) : (
+          <div className="ff-item-value">{client[item.key] || '—'}</div>
+        )}
+      </div>
+    ))}
+
+    {/* 2. DIRECCIÓN (Full Width - Textarea) */}
+    <div className="ff-master-item col-span-full">
+      <span className="ff-item-label">Dirección: </span>
+      {isEditingMaster ? (
+        <textarea 
+          className="ff-master-input ff-address-textarea"
+          value={editData.address || ''} 
+          onChange={e => setEditData({...editData, address: e.target.value})}
+          placeholder="Ej: Mercabarna, Pabellón G, Local 22..."
+        />
+      ) : (
+        <div className="ff-item-value ff-address-display">{client.address || 'No definida'}</div>
+      )}
+    </div>
+
+    {/* 3. Ciudad y País (Siguiente fila) */}
+    {[
+      { label: 'Ciudad', key: 'city' },
+      { label: 'País', key: 'country' },
+      { label: 'Sitio Web', key: 'website' }
+    ].map((item) => (
+      <div className="ff-master-item" key={item.key}>
+        <span className="ff-item-label">{item.label}</span>
+        {isEditingMaster ? (
+          <input 
+            className="ff-master-input"
+            value={editData[item.key] || ''} 
+            onChange={e => setEditData({...editData, [item.key]: e.target.value})}
+          />
+        ) : (
+          <div className="ff-item-value">{client[item.key] || '—'}</div>
+        )}
+      </div>
+    ))}
+
+    {/* 4. Resto de campos de contacto y términos */}
+    {[
+      { label: 'Teléfono', key: 'phone' },
+      { label: 'Contacto Principal', key: 'contact_name' },
+      { label: 'Email Notificaciones', key: 'contact_email' },
+      { label: 'Incoterm Default', key: 'default_incoterm' },
+      { label: 'Días de Crédito', key: 'credit_days' },
+      { label: 'Vendedor', key: 'sales_rep' }
+    ].map((item) => (
+      <div className="ff-master-item" key={item.key}>
+        <span className="ff-item-label">{item.label}</span>
+        {isEditingMaster ? (
+          <input 
+            className="ff-master-input"
+            type={item.key === 'credit_days' ? 'number' : 'text'}
+            value={editData[item.key] || ''} 
+            onChange={e => setEditData({...editData, [item.key]: e.target.value})}
+          />
+        ) : (
+          <div className="ff-item-value">{client[item.key] || '—'}</div>
+        )}
+      </div>
+    ))}
+  </div>
+</section>
 
             {/* MONITOR DE EMBARQUES */}
             <section className="pro-card">
@@ -420,6 +472,29 @@ export default function ClientDetailPage() {
         .link-all { font-size: 12px; color: #2563eb; font-weight: 700; text-decoration: none; display: flex; align-items: center; gap: 4px; }
         .txt-center { text-align: center; }
         .mini-padding { padding: 20px; }
+        .col-span-full {
+  grid-column: 1 / -1;
+}
+
+/* Estilo del textarea cuando editas */
+.ff-address-textarea {
+  min-height: 80px;
+  resize: vertical;
+  line-height: 1.5;
+  padding: 12px !important;
+  font-family: inherit;
+}
+
+/* Estilo de la dirección cuando solo se lee */
+.ff-address-display {
+  background: #f8fafc;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border-left: 4px solid #16a34a;
+  color: #334155;
+  white-space: pre-wrap; /* Mantiene saltos de línea */
+  font-size: 13px;
+}
       `}</style>
     </AdminLayout>
   );

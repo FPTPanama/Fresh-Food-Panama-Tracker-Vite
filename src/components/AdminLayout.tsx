@@ -57,9 +57,11 @@ export function AdminLayout({ title, subtitle, children }: { title?: string; sub
     (async () => {
       const { data } = await supabase.auth.getSession();
       if (!data.session?.access_token) { router.push("/login"); return; }
+      
       const res = await fetch(`${getApiBase()}/.netlify/functions/getMyProfile`, {
         headers: { Authorization: `Bearer ${data.session.access_token}` },
       });
+      
       if (res.ok) {
         const json = await res.json();
         setMe({ email: json.email ?? null, role: json.role ?? null });
