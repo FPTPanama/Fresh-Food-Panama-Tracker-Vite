@@ -9,6 +9,8 @@ import { supabase } from "../../lib/supabaseClient";
 import { getApiBase } from "../../lib/apiBase";
 import { AdminLayout, notify } from "../../components/AdminLayout";
 
+
+
 // --- HELPERS SENIOR ---
 const getInitials = (name: string) => name?.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2) || "??";
 
@@ -46,13 +48,26 @@ export default function AdminUsersPage() {
     setLoading(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
       const base = getApiBase();
-      const endpoint = activeTab === 'clients' ? `${base}/.netlify/functions/listClients` : `${base}/.netlify/functions/listUsers`;
-      const res = await fetch(endpoint, { headers: { Authorization: `Bearer ${session?.access_token}` } });
+      const endpoint = activeTab === 'clients'
+        ? `${base}/.netlify/functions/listClients`
+        : `${base}/.netlify/functions/listUsers`;
+
+      const res = await fetch(endpoint, {
+        headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+      });
+
+      if (!res.ok) throw new Error(`Error HTTP: ${res.status}`);
       const data = await res.json();
-      setDataList(data.items || []);
-    } catch (e) { notify("Error de conexión", "error"); }
-    finally { setLoading(false); }
+      setDataList(data?.items || []);
+    } catch (err: any) {
+      console.error("Error cargando datos:", err.message);
+      if (typeof notify === 'function') notify(err.message || "Error de conexión", "error");
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { loadData(); }, [activeTab]);
