@@ -25,6 +25,13 @@ export const commonHeaders = {
   "Access-Control-Max-Age": "86400",
 };
 
+/** Respuesta estándar para preflight OPTIONS (200 + body vacío, funciona en Safari y resto de navegadores) */
+export const optionsResponse = () => ({
+  statusCode: 200,
+  headers: commonHeaders,
+  body: "",
+});
+
 // 3. Funciones de Respuesta Estándar
 export function json(statusCode: number, body: any) {
   return {

@@ -158,7 +158,6 @@ export default function AdminDashboard() {
       } else { setErrShipments("Error cargando embarques"); }
 
       if (cRes.status === "fulfilled") {
-        // CORRECCIÓN AQUÍ: Paréntesis para evitar error de linting
         setClientsTotal(cRes.value.total ?? (cRes.value.items?.length || 0));
       }
     } finally {

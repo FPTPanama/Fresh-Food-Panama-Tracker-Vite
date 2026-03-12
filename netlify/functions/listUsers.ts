@@ -1,9 +1,9 @@
 // netlify/functions/listUsers.ts
 import type { Handler } from "@netlify/functions";
-import { getUserAndProfile, json, text, sbAdmin } from "./_util";
+import { getUserAndProfile, json, text, sbAdmin, optionsResponse } from "./_util";
 
 export const handler: Handler = async (event) => {
-  if (event.httpMethod === "OPTIONS") return json(200, { ok: true });
+  if (event.httpMethod === "OPTIONS") return optionsResponse();
   if (event.httpMethod !== "GET") return text(405, "Method not allowed");
 
   try {

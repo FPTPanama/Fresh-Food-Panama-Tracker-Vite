@@ -1,9 +1,9 @@
 // netlify/functions/getMyProfile.ts
 import type { Handler } from "@netlify/functions";
-import { getUserAndProfile, json, text } from "./_util";
+import { getUserAndProfile, json, text, optionsResponse } from "./_util";
 
 export const handler: Handler = async (event) => {
-  if (event.httpMethod === "OPTIONS") return json(200, { ok: true });
+  if (event.httpMethod === "OPTIONS") return optionsResponse();
 
   try {
     const { user, profile } = await getUserAndProfile(event);

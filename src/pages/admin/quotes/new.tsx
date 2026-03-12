@@ -72,13 +72,14 @@ export default function AdminQuoteNew() {
       const res = await fetch(`${getApiBase()}/.netlify/functions/listClients`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (!res.ok) throw new Error(`Error HTTP: ${res.status}`);
       const dataJson = await res.json();
       const items: ClientItem[] = Array.isArray(dataJson) ? dataJson : (dataJson.items || []);
 
       setClients(items);
       if (items.length > 0) setSelectedClientId(items[0].id);
-    } catch (e) {
-      setMsg({ type: 'error', text: "Error cargando clientes" });
+    } catch (e: any) {
+      setMsg({ type: 'error', text: e?.message || "Error cargando clientes" });
     } finally {
       setClientsLoading(false);
     }

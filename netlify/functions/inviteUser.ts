@@ -1,5 +1,6 @@
 import { Handler } from '@netlify/functions';
 import { createClient } from '@supabase/supabase-js';
+import { optionsResponse } from './_util';
 
 // Usamos el SERVICE_ROLE_KEY porque solo un admin puede invitar usuarios
 const supabase = createClient(
@@ -8,10 +9,7 @@ const supabase = createClient(
 );
 
 export const handler: Handler = async (event) => {
-  // Manejo de CORS y Método
-  if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 200, headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Content-Type, Authorization" }, body: "" };
-  }
+  if (event.httpMethod === "OPTIONS") return optionsResponse();
   if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
   try {

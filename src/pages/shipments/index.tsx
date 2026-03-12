@@ -83,6 +83,7 @@ export default function ShipmentsPage() {
       const res = await fetch(`${getApiBase()}/.netlify/functions/listShipments?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (!res.ok) throw new Error(`Error HTTP: ${res.status}`);
       const json = await res.json();
       setItems(json.items || []);
       setTotal(json.total || 0);

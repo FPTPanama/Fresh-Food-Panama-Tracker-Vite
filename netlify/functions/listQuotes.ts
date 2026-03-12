@@ -1,11 +1,9 @@
 // netlify/functions/listQuotes.ts
 import type { Handler } from "@netlify/functions";
-import { sbAdmin, getUserAndProfile, json, text, isPrivilegedRole, commonHeaders } from "./_util";
+import { sbAdmin, getUserAndProfile, json, text, isPrivilegedRole, optionsResponse } from "./_util";
 
 export const handler: Handler = async (event) => {
-  if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 204, headers: commonHeaders, body: "" };
-  }
+  if (event.httpMethod === "OPTIONS") return optionsResponse();
   if (event.httpMethod !== "GET") return text(405, "Method not allowed");
 
   try {

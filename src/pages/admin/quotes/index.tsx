@@ -121,16 +121,20 @@ export default function AdminQuotesIndex() {
 
   async function load() {
     setLoading(true);
+    setError(null);
     try {
       const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
       const t = new Date().getTime();
       const url = `${getApiBase()}/.netlify/functions/listQuotes?${queryString}&t=${t}`;
       const res = await fetch(url, {
-        headers: { 
-          Authorization: `Bearer ${session?.access_token}`,
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
           "Cache-Control": "no-cache"
         },
       });
+      if (!res.ok) throw new Error(`Error HTTP: ${res.status}`);
       const json = await res.json() as ApiResponse;
       setItems(json.items || []);
     } catch (err: any) {
@@ -148,7 +152,11 @@ export default function AdminQuotesIndex() {
 
   return (
     <AdminLayout title="Cotizaciones" subtitle="Gestión comercial y pipeline de ventas.">
-      
+      {error && (
+        <div className="errorBanner" role="alert">
+          <AlertCircle size={18} /> {error}
+        </div>
+      )}
       {/* 1. HEADER: 4 GRIDS DE RESUMEN (ESTILO FINO) */}
       <div className="statsGrid">
   <div className="statCard action" onClick={() => router.push('/admin/quotes/new')}>
@@ -247,6 +255,7 @@ export default function AdminQuotesIndex() {
 
       <style jsx>{`
         /* --- FUENTES Y LAYOUT --- */
+        .errorBanner { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; padding: 12px 16px; border-radius: 10px; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; font-size: 13px; }
         .statsGrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
         .statCard { background: white; padding: 16px; border-radius: 12px; border: 1px solid #f1f5f9; display: flex; align-items: center; gap: 12px; }
         .statCard.action { border: 1px solid #dcfce7; cursor: pointer; transition: 0.2s; }

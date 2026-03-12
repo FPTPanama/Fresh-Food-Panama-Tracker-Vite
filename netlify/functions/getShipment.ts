@@ -1,8 +1,8 @@
 import type { Handler } from "@netlify/functions";
-import { sbAdmin, getUserAndProfile, json, text, isPrivilegedRole } from "./_util";
+import { sbAdmin, getUserAndProfile, json, text, isPrivilegedRole, optionsResponse } from "./_util";
 
 export const handler: Handler = async (event) => {
-  if (event.httpMethod === "OPTIONS") return json(200, { ok: true });
+  if (event.httpMethod === "OPTIONS") return optionsResponse();
   try {
     const { user, profile } = await getUserAndProfile(event);
     if (!user || !profile) return text(401, "Unauthorized");

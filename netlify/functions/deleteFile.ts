@@ -1,12 +1,14 @@
 import { Handler } from "@netlify/functions";
 import { createClient } from "@supabase/supabase-js";
+import { optionsResponse } from "./_util";
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY! 
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
 export const handler: Handler = async (event) => {
+  if (event.httpMethod === "OPTIONS") return optionsResponse();
   if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method Not Allowed" };
 
   try {

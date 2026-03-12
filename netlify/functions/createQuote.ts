@@ -1,6 +1,6 @@
 // netlify/functions/createQuote.ts
 import type { Handler } from "@netlify/functions";
-import { sbAdmin, getUserAndProfile, json, text, isPrivilegedRole } from "./_util";
+import { sbAdmin, getUserAndProfile, json, text, isPrivilegedRole, optionsResponse } from "./_util";
 
 function yearFromNow() {
   return new Date().getFullYear();
@@ -36,7 +36,7 @@ async function getNextQuoteNumber(year: number) {
 const DEFAULT_TERMS_ES = `TÉRMINOS Y CONDICIONES — EXPORTACIÓN DE PIÑAS (Fresh Food Panamá)...`; // (Mantén tu texto completo aquí)
 
 export const handler: Handler = async (event) => {
-  if (event.httpMethod === "OPTIONS") return json(200, { ok: true });
+  if (event.httpMethod === "OPTIONS") return optionsResponse();
   if (event.httpMethod !== "POST") return text(405, "Method not allowed");
 
   try {
