@@ -129,10 +129,7 @@ export default function AdminQuotesIndex() {
       const t = new Date().getTime();
       const url = `${getApiBase()}/.netlify/functions/listQuotes?${queryString}&t=${t}`;
       const res = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          "Cache-Control": "no-cache"
-        },
+        headers: { Authorization: `Bearer ${session.access_token}` },
       });
       if (!res.ok) throw new Error(`Error HTTP: ${res.status}`);
       const json = await res.json() as ApiResponse;

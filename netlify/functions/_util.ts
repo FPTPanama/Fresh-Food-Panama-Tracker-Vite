@@ -20,7 +20,7 @@ export const sbAdmin = createClient(supabaseUrl, supabaseServiceKey, {
 export const commonHeaders = {
   "Content-Type": "application/json",
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "Authorization, Content-Type, Cache-Control, X-Requested-With, Accept",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type, Cache-Control, X-Requested-With, Accept, cache-control",
   "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
   "Access-Control-Max-Age": "86400",
 };
