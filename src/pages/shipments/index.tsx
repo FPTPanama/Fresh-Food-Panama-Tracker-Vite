@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { Search, Calendar, Package, MapPin, RefreshCcw, Plane, PlusCircle, ArrowRight, Plus, Layers } from "lucide-react";
 import { supabase } from "../../lib/supabaseClient";
@@ -66,7 +67,7 @@ export default function ShipmentsPage() {
   );
 };
 
-  async function fetchShipments() {
+  const fetchShipments = useCallback(async () => {
     setLoading(true);
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData?.session?.access_token;
@@ -92,9 +93,9 @@ export default function ShipmentsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [search, destFilter]);
 
-  useEffect(() => { fetchShipments(); }, [destFilter]);
+  useEffect(() => { fetchShipments(); }, [fetchShipments]);
 
   return (
   <ClientLayout title="Panel de Logística" wide>
@@ -106,9 +107,11 @@ export default function ShipmentsPage() {
         <div className="ff-client-profile">
           <div className="ff-logo-wrapper">
             {items[0]?.clients?.logo_url ? (
-              <img 
+              <Image 
                 src={`https://oqgkbduqztrpfhfclker.supabase.co/storage/v1/object/public/client-logos/${items[0].clients.logo_url}`} 
                 alt="Logo" 
+                width={64}
+                height={64}
                 className="ff-logo-img"
               />
             ) : (

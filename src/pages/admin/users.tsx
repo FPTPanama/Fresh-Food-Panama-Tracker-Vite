@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import Image from "next/image";
 import { useRouter } from "next/router";
 import { 
   Plus, X, Mail, Phone, Loader2, Send, Search, Copy, 
@@ -43,8 +44,7 @@ export default function AdminUsersPage() {
   
   const [f, setF] = useState(initialForm);
 
-  // --- CARGA DE DATOS ---
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -68,9 +68,9 @@ export default function AdminUsersPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeTab]);
 
-  useEffect(() => { loadData(); }, [activeTab]);
+  useEffect(() => { loadData(); }, [loadData]);
 
   const filteredData = useMemo(() => {
     return dataList.filter(item => {
@@ -178,7 +178,7 @@ export default function AdminUsersPage() {
         <div className="client-cell">
           <div className="avatar-box">
             {item.logo_url ? (
-              <img src={`https://fofvskqshlyqmsvshnps.supabase.co/storage/v1/object/public/client-logos/${item.logo_url}`} alt="L" />
+              <Image src={`https://fofvskqshlyqmsvshnps.supabase.co/storage/v1/object/public/client-logos/${item.logo_url}`} alt="Logo" width={40} height={40} />
             ) : (
               <div className="avatar-fallback">{getInitials(item.name || item.full_name)}</div>
             )}
@@ -253,7 +253,12 @@ export default function AdminUsersPage() {
               {/* SUBIDA DE LOGO PREMIUM */}
               <div className="logo-upload-box">
                 <div className="preview-circle">
-                  {previewUrl ? <img src={previewUrl} /> : <div className="placeholder">{getInitials(f.name)}</div>}
+                  {previewUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- blob URL preview, Next Image no soporta blob:
+                  <img src={previewUrl} alt="Preview del logo" />
+                ) : (
+                  <div className="placeholder">{getInitials(f.name)}</div>
+                )}
                   <label htmlFor="logo-input" className="edit-overlay"><Upload size={14}/></label>
                 </div>
                 <input id="logo-input" type="file" hidden onChange={e => {

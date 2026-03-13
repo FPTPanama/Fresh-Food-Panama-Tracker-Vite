@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { supabase } from "../lib/supabaseClient";
@@ -67,7 +68,7 @@ export function AdminLayout({ title, subtitle, children }: { title?: string; sub
         setMe({ email: json.email ?? null, role: json.role ?? null });
       }
     })();
-  }, []);
+  }, [router]);
 
   const logout = async () => { await supabase.auth.signOut(); router.push("/login"); };
 
@@ -84,7 +85,7 @@ export function AdminLayout({ title, subtitle, children }: { title?: string; sub
       <header className="ff-top">
         <div className="ff-top__inner">
           <div className="ff-top__left">
-            <img src={LOGO_SRC} alt="FF" className="ff-top__logo" />
+            <Image src={LOGO_SRC} alt="FF" width={40} height={40} className="ff-top__logo" />
             <div className="ff-top__titleWrap">
               {title && <h1 className="ff-top__title">{title}</h1>}
               {subtitle && <div className="ff-top__sub">{subtitle}</div>}

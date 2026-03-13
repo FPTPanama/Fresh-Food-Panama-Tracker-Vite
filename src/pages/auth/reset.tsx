@@ -1,5 +1,6 @@
 // src/pages/auth/reset.tsx
 import { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { Lock, CheckCircle2, AlertTriangle, ArrowLeft, Eye, EyeOff } from "lucide-react";
@@ -162,7 +163,7 @@ export default function ResetPasswordPage() {
       <div className="card">
         <div className="head">
           <div className="brand">
-            <img src="/brand/freshfood-logo.svg" alt="Fresh Food Panamá" className="logo" draggable={false} />
+            <Image src="/brand/freshfood-logo.svg" alt="Fresh Food Panamá" width={80} height={40} className="logo" draggable={false} />
           </div>
 
           <div className="title">Restablecer contraseña</div>

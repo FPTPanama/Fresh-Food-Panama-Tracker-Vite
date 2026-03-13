@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
+import Image from "next/image";
 import Link from "next/link";
 import { supabase } from "../../lib/supabaseClient";
 import { getApiBase } from "../../lib/apiBase";
@@ -288,7 +289,7 @@ export default function ShipmentDetailPage() {
         <div className="ff-main-photo-wrapper">
            {/* Usamos encadenamiento opcional ?. para evitar el crash */}
            <div className="ff-main-photo" onClick={() => data.photos[activePhotoIdx]?.id && download(data.photos[activePhotoIdx].id)}>
-              <img src={data.photos[activePhotoIdx]?.url || ''} alt="Inspección" />
+              <Image src={data.photos[activePhotoIdx]?.url || ''} alt="Inspección" width={600} height={400} />
               <div className="ff-photo-counter">
                 {activePhotoIdx + 1} / {data.photos.length}
               </div>
@@ -302,7 +303,7 @@ export default function ShipmentDetailPage() {
               onClick={() => setActivePhotoIdx(idx)}
               onMouseEnter={() => setActivePhotoIdx(idx)}
             >
-              <img src={p.url || ''} alt="thumb" />
+              <Image src={p.url || ''} alt="thumb" width={80} height={60} />
             </div>
           ))}
         </div>

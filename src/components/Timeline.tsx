@@ -63,6 +63,15 @@ function iconFor(type: MilestoneType) {
 }
 
 export function Timeline({ milestones }: { milestones: Milestone[] }) {
+  const sorted = useMemo(() => {
+    if (!milestones?.length) return [];
+    return [...milestones].sort((a, b) => {
+      const da = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const db = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return db - da;
+    });
+  }, [milestones]);
+
   if (!milestones?.length) {
     return (
       <div style={{ padding: '40px 20px', textAlign: 'center', background: '#f8fafc', borderRadius: '12px', border: '1px dashed #e2e8f0' }}>
@@ -71,14 +80,6 @@ export function Timeline({ milestones }: { milestones: Milestone[] }) {
       </div>
     );
   }
-
-  const sorted = useMemo(() => {
-    return [...milestones].sort((a, b) => {
-      const da = a.created_at ? new Date(a.created_at).getTime() : 0;
-      const db = b.created_at ? new Date(b.created_at).getTime() : 0;
-      return db - da; 
-    });
-  }, [milestones]);
 
   return (
     <div className="air-timeline">

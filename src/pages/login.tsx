@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import { supabase } from "../lib/supabaseClient";
 import { getApiBase } from "../lib/apiBase";
 import { LogIn, ShieldCheck, CheckCircle2, Eye, EyeOff } from "lucide-react";
@@ -110,10 +111,13 @@ export default function LoginPage() {
         {/* LADO DERECHO: FORMULARIO CON LOGO CENTRADO */}
         <div className="ff-login-form-side">
           <div className="ff-form-header">
-            <img 
+            <Image 
               src="/brand/freshfood_logo.png" 
               alt="FreshFood Panama" 
-              className="ff-form-logo" 
+              width={220}
+              height={65}
+              className="ff-form-logo"
+              style={{ width: "auto", height: 65, objectFit: "contain" }}
             />
             <h1>Portal de Clientes</h1>
             <p>Ingresa tus credenciales para continuar.</p>

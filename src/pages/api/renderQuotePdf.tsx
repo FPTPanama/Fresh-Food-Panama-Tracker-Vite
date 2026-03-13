@@ -217,11 +217,13 @@ const PdfTemplate = ({ data }: { data: any }) => {
       <Page size="LETTER" style={styles.page}>
         
         <View style={styles.watermarkContainer}>
+          {/* eslint-disable-next-line jsx-a11y/alt-text -- @react-pdf Image no soporta alt */}
           <Image src={path.join(brandDir, 'FFPWM.png')} style={styles.watermarkImage} />
         </View>
 
         <View style={styles.header}>
           <View>
+            {/* eslint-disable-next-line jsx-a11y/alt-text -- @react-pdf Image no soporta alt */}
             <Image src={path.join(brandDir, 'freshfood_logo.png')} style={styles.logo} />
             <View style={styles.companySub}>
               <Text style={{ fontWeight: 'bold', color: '#234d23', fontSize: 9 }}>Fresh Food Panamá, C.A.</Text>

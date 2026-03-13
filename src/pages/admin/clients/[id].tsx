@@ -1,4 +1,5 @@
 import { useRouter } from 'next/router';
+import Image from 'next/image';
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../../lib/supabaseClient';
 import { AdminLayout, notify } from '../../../components/AdminLayout';
@@ -131,7 +132,7 @@ export default function ClientDetailPage() {
             <div className="ff-client-profile">
               <div className="ff-logo-wrapper">
                 {client.logo_url ? (
-                  <img src={`https://oqgkbduqztrpfhfclker.supabase.co/storage/v1/object/public/client-logos/${client.logo_url}`} className="ff-logo-img" alt="logo" />
+                  <Image src={`https://oqgkbduqztrpfhfclker.supabase.co/storage/v1/object/public/client-logos/${client.logo_url}`} alt="Logo del cliente" width={64} height={64} className="ff-logo-img" />
                 ) : (
                   <div className="ff-logo-placeholder">{client.name?.charAt(0)}</div>
                 )}

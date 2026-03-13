@@ -122,7 +122,7 @@ export function LocationSelector({
           {results.length === 0 && !loading && query.length >= 3 && (
             <div className="option create-new" onClick={createNewLocation}>
               <Plus size={14} />
-              <span>Crear <b>"{query}"</b> como nuevo destino</span>
+              <span>Crear <b>&quot;{query}&quot;</b> como nuevo destino</span>
             </div>
           )}
         </div>
