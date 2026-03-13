@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { supabase } from "../../../lib/supabaseClient";
@@ -89,7 +90,7 @@ export default function AdminShipmentDetail() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  async function load(shipmentId: string) {
+  const load = useCallback(async (shipmentId: string) => {
     setLoading(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -101,15 +102,15 @@ export default function AdminShipmentDetail() {
       
       setData(json);
       setFlight(json.flight_number || "");
-setAwb(json.awb || "");
-setCaliber(json.calibre || ""); // <--- Cambiado a 'calibre'
-setColor(json.color || "");
+      setAwb(json.awb || "");
+      setCaliber(json.calibre || "");
+      setColor(json.color || "");
     } catch (e) {
       showToast("Error al cargar embarque", "error");
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -119,7 +120,7 @@ setColor(json.color || "");
         if (typeof id === "string") load(id);
       }
     })();
-  }, [id]);
+  }, [id, load]);
 
   // Sincronización con Timeline.tsx
   const timelineItems = useMemo(() => {
@@ -282,7 +283,7 @@ setColor(json.color || "");
               <div className="photos-grid">
                 {data?.photos?.map(p => (
                   <div key={p.id} className="photo-item">
-                    <img src={p.url || ""} alt="Evidencia" />
+                    <Image src={p.url || ""} alt="Evidencia" width={120} height={90} />
                     <div className="photo-overlay">
                       <button onClick={() => download(p.id)}><Download size={16}/></button>
                       <button onClick={() => deleteFile(p.id)} className="danger"><X size={16}/></button>

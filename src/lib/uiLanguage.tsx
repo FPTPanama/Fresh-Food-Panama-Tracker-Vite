@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 export type UILang = "es" | "en";
 
@@ -29,9 +29,9 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   };
 
-  const toggle = () => setLang(lang === "es" ? "en" : "es");
+  const toggle = useCallback(() => setLang(lang === "es" ? "en" : "es"), [lang]);
 
-  const value = useMemo(() => ({ lang, setLang, toggle }), [lang]);
+  const value = useMemo(() => ({ lang, setLang, toggle }), [lang, toggle]);
 
   return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;
 }

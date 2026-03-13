@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { 
   Search, 
@@ -22,7 +22,7 @@ export default function ShipmentsPage() {
   const [search, setSearch] = useState("");
   const [destination, setDestination] = useState("");
 
-  const fetchShipments = async () => {
+  const fetchShipments = useCallback(async () => {
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData?.session?.access_token;
@@ -38,9 +38,9 @@ export default function ShipmentsPage() {
     } catch (e) {
       console.error("Error cargando embarques");
     }
-  };
+  }, [search, destination]);
 
-  useEffect(() => { fetchShipments(); }, [destination]);
+  useEffect(() => { fetchShipments(); }, [fetchShipments]);
 
   return (
     <ClientLayout title="Mis Embarques" subtitle="Panel de control logístico" wide>

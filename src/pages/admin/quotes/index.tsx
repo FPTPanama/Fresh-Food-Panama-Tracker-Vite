@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { 
@@ -116,7 +116,7 @@ export default function AdminQuotesIndex() {
     return p.toString();
   }, [dir, sortField, status, q]);
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -136,11 +136,11 @@ export default function AdminQuotesIndex() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [queryString]);
 
   useEffect(() => {
     if (authOk) load();
-  }, [authOk, queryString]);
+  }, [authOk, load]);
 
   if (!authOk) return null;
 

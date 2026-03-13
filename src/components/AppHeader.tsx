@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, LogOut, Package, Users } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
@@ -107,12 +108,13 @@ export function AppHeader({ variant }: { variant: "client" | "admin" }) {
         <div className="ff-row" style={{ gap: 14, alignItems: "center", minWidth: 320 }}>
           {/* Contenedor SIN recorte */}
           <div style={{ display: "flex", alignItems: "center" }}>
-            <img
+            <Image
               src="/brand/freshfood-logo.svg"
               alt="Fresh Food Panamá"
+              width={120}
+              height={34}
               style={{ height: 34, width: "auto", display: "block" }}
               onError={(e) => {
-                // fallback visible si la ruta falla
                 (e.currentTarget as HTMLImageElement).src = "/brand/freshfood-logo.png";
               }}
             />

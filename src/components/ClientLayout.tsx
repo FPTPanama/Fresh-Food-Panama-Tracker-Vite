@@ -1,5 +1,6 @@
 // src/components/ClientLayout.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { supabase } from "../lib/supabaseClient";
@@ -97,7 +98,7 @@ export function ClientLayout({
       <header className="ff-top">
         <div className="ff-top__inner">
           <div className="ff-top__left">
-            <img src={LOGO_SRC} alt="Fresh Food Panamá" className="ff-top__logo" />
+            <Image src={LOGO_SRC} alt="Fresh Food Panamá" width={40} height={40} className="ff-top__logo" />
             <div className="ff-top__titleWrap">
               {title ? <h1 className="ff-top__title">{title}</h1> : null}
               {subtitle ? <div className="ff-top__sub">{subtitle}</div> : null}

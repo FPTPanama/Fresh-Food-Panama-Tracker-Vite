@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useCallback, useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/router";
 import {
   Search, PlusCircle, ChevronRight, Ship, Plane, 
@@ -76,7 +76,7 @@ export default function AdminShipments() {
     })();
   }, []);
 
-  const loadBaseData = async () => {
+  const loadBaseData = useCallback(async () => {
     setLoadingList(true);
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
@@ -98,9 +98,9 @@ export default function AdminShipments() {
     setProducts(p || []);
     setAllVarieties(v || []);
     setLoadingList(false);
-  };
+  }, [q, dir]);
 
-  useEffect(() => { if (authOk) loadBaseData(); }, [authOk, q, dir]);
+  useEffect(() => { if (authOk) loadBaseData(); }, [authOk, loadBaseData]);
 
   const filteredVarieties = useMemo(() => {
     if (!formData.product_id) return [];

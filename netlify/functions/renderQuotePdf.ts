@@ -115,60 +115,85 @@ function drawKeyValueLines(doc: any, lines: any[], boxWidth: number) {
   doc.y = y + h + 8;
 }
 
+/**
+ * AJUSTADO: Ahora usa la lógica de QuoteView.tsx 
+ * Desglosa los costos s_ (Venta) definidos en el editor.
+ */
 function drawItemsTable(doc: any, opts: any) {
-  const { lang, currency, items, total, boxWidth } = opts;
+  const { lang, currency, quote, boxWidth } = opts;
   const x = doc.page.margins.left;
-  doc.font("Inter-Bold").fontSize(12).fillColor("#0f172a").text(t(lang, "Detalle", "Details"));
+  
+  doc.font("Inter-Bold").fontSize(12).fillColor("#0f172a").text(t(lang, "Detalle de la Oferta", "Offer Details"));
   doc.moveDown(0.35);
   
   const tableTopY = doc.y;
   const headerH = 20;
   doc.roundedRect(x, tableTopY, boxWidth, headerH, 10).strokeColor("#e5e7eb").stroke();
   doc.font("Inter-Bold").fontSize(9).fillColor("#475569");
-  doc.text(t(lang, "Item", "Item"), x + 10, tableTopY + 6);
+  doc.text(t(lang, "Descripción", "Description"), x + 10, tableTopY + 6);
+  doc.text(t(lang, "Cantidad", "Qty"), x + 280, tableTopY + 6);
   doc.text(t(lang, "Total", "Total"), x, tableTopY + 6, { width: boxWidth - 10, align: "right" });
   
   doc.y = tableTopY + headerH + 10;
-  const safeItems = Array.isArray(items) ? items : [];
-  for (const it of safeItems) {
-    ensureSpace(doc, 20);
-    doc.font("Inter").fontSize(10).fillColor("#0f172a").text(it.name || "—", x + 10, doc.y);
-    doc.font("Inter-Bold").text(money(it.total || 0, currency), x, doc.y, { width: boxWidth - 10, align: "right" });
-    doc.y += 18;
+
+  // Construimos los items basados en los costos s_ (Sale) del editor
+  const c = quote.costs || {};
+  const det = quote.product_details || {};
+  const items = [
+    {
+      name: `${det.variety || 'Fruta'} (${det.color || ''} ${det.brix || ''})`,
+      qty: `${quote.boxes} Boxes`,
+      total: (quote.boxes || 0) * (c.s_fruit || 0)
+    },
+    {
+      name: t(lang, "Logística Internacional y Manejo", "International Logistics & Handling"),
+      qty: `${quote.weight_kg} Kg`,
+      total: (quote.weight_kg || 0) * (c.s_freight || 0) + (c.s_origin || 0) + (c.s_aduana || 0) + (c.s_handling || 0)
+    },
+    {
+      name: t(lang, "Otros Cargos (Insp, Tasas, Otros)", "Other Charges (Insp, Taxes, Other)"),
+      qty: "1 Unit",
+      total: (c.s_insp || 0) + (c.s_itbms || 0) + (c.s_other || 0)
+    }
+  ].filter(i => i.total > 0);
+
+  for (const it of items) {
+    ensureSpace(doc, 24);
+    const rowY = doc.y;
+    doc.font("Inter").fontSize(10).fillColor("#0f172a").text(it.name, x + 10, rowY, { width: 260 });
+    doc.text(it.qty, x + 280, rowY);
+    doc.font("Inter-Bold").text(money(it.total, currency), x, rowY, { width: boxWidth - 10, align: "right" });
+    doc.y = Math.max(doc.y, rowY + 20);
+    // Linea divisoria tenue
+    doc.strokeColor("#f1f5f9").moveTo(x + 10, doc.y).lineTo(x + boxWidth - 10, doc.y).stroke();
+    doc.y += 5;
   }
+
   doc.moveDown(1);
-  doc.font("Inter-Bold").fontSize(12).text(`${t(lang, "Total", "Total")}: ${money(total, currency)}`, { align: "right" });
+  doc.font("Inter-Bold").fontSize(14).fillColor("#16a34a");
+  doc.text(`${t(lang, "Valor Total Venta", "Total Sale Value")}: ${money(quote.total, currency)}`, { align: "right" });
 }
 
 export const handler: Handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return optionsResponse();
 
   try {
+    // Auth logic (mantenida de tu original)
     const tokenFromUrl = event.queryStringParameters?.token;
-    const tokenFromHeader = event.headers?.authorization || event.headers?.Authorization;
     if (tokenFromUrl) {
       event.headers = event.headers || {};
       (event.headers as any).authorization = `Bearer ${tokenFromUrl}`;
     }
 
     const { user, profile } = await getUserAndProfile(event);
-    if (!user || !profile) {
-      console.error("[renderQuotePdf] Auth failed:", {
-        hasToken: !!(tokenFromUrl || tokenFromHeader),
-        tokenLen: tokenFromUrl?.length || tokenFromHeader?.length || 0,
-      });
-      return text(401, "Unauthorized");
-    }
-    if (!isPrivilegedRole(profile.role || "")) {
-      console.error("[renderQuotePdf] Role rejected:", profile.role);
-      return text(403, "Forbidden");
-    }
+    if (!user || !profile) return text(401, "Unauthorized");
+    if (!isPrivilegedRole(profile.role || "")) return text(403, "Forbidden");
 
     const id = String(event.queryStringParameters?.id || "").trim();
-    const variant = (event.queryStringParameters?.variant || "2") as "1" | "2";
     const lang = (event.queryStringParameters?.lang || "es") as "es" | "en";
     if (!id) return text(400, "Missing id");
 
+    // DATA FETCHING
     const { data, error } = await sbAdmin
       .from("quotes")
       .select("*, clients(*)")
@@ -177,50 +202,50 @@ export const handler: Handler = async (event) => {
 
     if (error || !data) return text(404, "Quote not found");
 
+    // ASSETS
     const brandDir = path.join(process.cwd(), "public", "brand");
-const logoBuf = readIfExists(path.join(brandDir, "freshfood_logo.png"));
-const wmBuf = readIfExists(path.join(brandDir, "FFPWM.png"));
+    const logoBuf = readIfExists(path.join(brandDir, "freshfood_logo.png"));
+    const wmBuf = readIfExists(path.join(brandDir, "FFPWM.png"));
     const interRegularBuf = readIfExists(path.join(brandDir, "Inter-Regular.ttf"));
     const interBoldBuf = readIfExists(path.join(brandDir, "Inter-Bold.ttf"));
 
-    if (!interRegularBuf || !interBoldBuf) {
-      console.error("Fuentes no encontradas en:", brandDir);
-      return text(500, "Error crítico: Assets del sistema no disponibles.");
-    }
+    if (!interRegularBuf || !interBoldBuf) return text(500, "Fonts missing");
 
-    const totals = data.totals || {};
-    const meta = totals.meta || {};
-    const quoteNumber = data.quote_number || `RFQ-${data.id.slice(0,5)}`;
+    const quoteNumber = data.quote_number || `Q-${data.id.slice(0,5)}`;
     const dateStr = new Date(data.created_at).toLocaleDateString(lang === "en" ? "en-US" : "es-PA");
 
     const doc = new (PDFDocument as any)({ size: "A4", margin: 42 });
-
-    // Registro de fuentes desde Buffer (Evita problemas de path en Netlify)
     doc.registerFont("Inter", interRegularBuf);
     doc.registerFont("Inter-Bold", interBoldBuf);
     doc.font("Inter");
 
     const boxWidth = doc.page.width - 84;
 
-    // Generar Contenido
+    // RENDER
     drawWatermark(doc, wmBuf);
-    drawHeader(doc, { lang, quoteNumber, incoterm: meta.incoterm || "CIP", place: meta.place || data.destination, dateStr, logoBuf });
+    drawHeader(doc, { 
+      lang, 
+      quoteNumber, 
+      incoterm: data.terms || "CIP", 
+      place: data.destination || "PTY", 
+      dateStr, 
+      logoBuf 
+    });
 
     drawKeyValueLines(doc, [
-      { k: t(lang, "Cliente", "Client"), v: data.clients?.name || data.client_snapshot?.name },
-      { k: t(lang, "Email", "Email"), v: data.clients?.contact_email || data.client_snapshot?.email }
+      { k: t(lang, "Cliente", "Client"), v: data.clients?.name || "N/A" },
+      { k: t(lang, "Atención", "Attn"), v: data.clients?.contact_name || "Purchasing Dept." },
+      { k: t(lang, "Puerto/Destino", "Port/Dest"), v: data.destination || "N/A" }
     ], boxWidth);
 
-    if (variant === "2") {
-      drawItemsTable(doc, { lang, currency: data.currency, items: totals.items, total: totals.total, boxWidth });
-    }
+    // TABLA PRINCIPAL
+    drawItemsTable(doc, { lang, currency: data.currency || "USD", quote: data, boxWidth });
 
-    const terms = String(data.terms || "");
-    if (terms) {
-      doc.moveDown(1);
-      doc.font("Inter-Bold").fontSize(10).text(t(lang, "Términos y condiciones", "Terms & Conditions"));
-      doc.font("Inter").fontSize(9).text(terms, { width: boxWidth, align: "justify" });
-    }
+    // TÉRMINOS
+    const termsText = data.terms_conditions || "Precios sujetos a disponibilidad y cambios en tarifas de flete.";
+    doc.moveDown(2);
+    doc.font("Inter-Bold").fontSize(10).fillColor("#0f172a").text(t(lang, "Notas y Términos", "Notes & Terms"));
+    doc.font("Inter").fontSize(9).fillColor("#475569").text(termsText, { width: boxWidth, align: "justify" });
 
     drawFooter(doc, lang);
 
@@ -231,13 +256,13 @@ const wmBuf = readIfExists(path.join(brandDir, "FFPWM.png"));
       statusCode: 200,
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": `inline; filename="${filename}"`,
       },
       body: pdfBuffer.toString("base64"),
       isBase64Encoded: true,
     };
   } catch (e: any) {
-    console.error("FATAL PDF:", e.message);
-    return text(500, "Error generando PDF");
+    console.error("PDF ERROR:", e.message);
+    return text(500, "Internal Server Error");
   }
 };

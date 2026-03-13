@@ -1,4 +1,5 @@
 import React from 'react';
+import Image from 'next/image';
 
 export const QuoteTemplate = ({ data, viewMode }: { data: any; viewMode?: string }) => {
   if (!data) return null;
@@ -18,7 +19,7 @@ export const QuoteTemplate = ({ data, viewMode }: { data: any; viewMode?: string
         <header className="main-header">
           <div className="brand-section">
             <div className="logo-container">
-              <img src="/brand/freshfood_logo.png" alt="Fresh Food Panama" className="company-logo" />
+              <Image src="/brand/freshfood_logo.png" alt="Fresh Food Panama" width={120} height={48} className="company-logo" />
             </div>
             <div className="brand-details">
               <p><strong>RUC:</strong> 155716550-2-2022-DV 25</p>
