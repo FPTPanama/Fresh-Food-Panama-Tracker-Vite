@@ -1,9 +1,3 @@
-# 1. ESTO OBLIGA A NETLIFY A NO USAR EL PLUGIN DE NEXT
-[[plugins]]
-  package = "@netlify/plugin-nextjs"
-  [plugins.inputs]
-    disableRuntime = true
-
 [build]
   command = "npm run build"
   publish = "dist"
@@ -12,13 +6,10 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
-[functions.renderQuotePdf]
-  included_files = ["public/brand/**"]
-
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
+[functions."renderQuotePdf"]
+  included_files = [
+    "public/brand/**"
+  ]
 
 [[headers]]
   for = "/.netlify/functions/*"
@@ -26,3 +17,8 @@
     Access-Control-Allow-Origin = "*"
     Access-Control-Allow-Headers = "Authorization, Content-Type, Cache-Control, X-Requested-With, Accept"
     Access-Control-Allow-Methods = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
