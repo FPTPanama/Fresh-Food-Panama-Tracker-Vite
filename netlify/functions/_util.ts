@@ -1,13 +1,19 @@
 import { createClient } from "@supabase/supabase-js";
 import type { HandlerEvent } from "@netlify/functions";
 
-const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+// 1. Cargamos y limpiamos las variables inmediatamente
+const rawUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const rawKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
+const supabaseUrl = rawUrl.trim();
+const supabaseServiceKey = rawKey.trim();
+
+// 2. Validación crítica: Si fallan, la función se detiene con un error claro
 if (!supabaseUrl || !supabaseServiceKey) {
-  console.error("Faltan variables de entorno de Supabase en las funciones.");
+  throw new Error("Faltan variables de entorno de Supabase en las funciones o están vacías.");
 }
 
+// 3. Inicialización del cliente (ahora TypeScript sabe que no están vacías) 🚀
 export const sbAdmin = createClient(supabaseUrl, supabaseServiceKey, {
   auth: { 
     persistSession: false, 
@@ -72,8 +78,12 @@ export async function getUserAndProfile(event: HandlerEvent) {
   if (!token) return { token: null, user: null, profile: null };
 
   try {
+    // Usamos el cliente administrativo para verificar el token del usuario
     const { data: authData, error: authError } = await sbAdmin.auth.getUser(token);
-    if (authError || !authData?.user) return { token, user: null, profile: null };
+    if (authError || !authData?.user) {
+      console.error("Auth error:", authError);
+      return { token, user: null, profile: null };
+    }
 
     const { data: profile, error: pErr } = await sbAdmin
       .from("profiles")
