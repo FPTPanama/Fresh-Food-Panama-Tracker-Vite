@@ -1,21 +1,24 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import path from 'path';
+import { fileURLToPath } from 'url';
+import { dirname, resolve } from 'path';
+
+// --- CONFIGURACIÓN PARA ES MODULES ---
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 export default defineConfig({
-    
   plugins: [react()],
+  base: '/', // Asegura que las rutas de los archivos sean relativas a la raíz
   resolve: {
     alias: {
-      // Esto es VITAL: permite que tus imports sigan funcionando
-      // si usabas rutas relativas o absolutas
-      '@': path.resolve(__dirname, './src'),
+      // Ahora usamos resolve de forma segura para Vite
+      '@': resolve(__dirname, './src'),
     },
   },
   server: {
-    port: 3000, // Tu puerto de desarrollo
+    port: 3000,
     proxy: {
-      // Mantenemos la comunicación con tus funciones de Netlify
       '/.netlify/functions': {
         target: 'http://localhost:8888',
         changeOrigin: true,
