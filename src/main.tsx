@@ -1,7 +1,10 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import App from './App';
+import './styles/globals.css' // Verifica que esta ruta a tu CSS global sea correcta
 
-// Prueba mínima:
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <h1>Hola desde Netlify 🚀</h1>
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
 )
