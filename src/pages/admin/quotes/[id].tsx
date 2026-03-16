@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { 
   Save, FileText, Loader2, Plane, Ship, 
   Thermometer, Droplets, Calculator, MapPin, Shield, ArrowRight, Package,
-  Maximize 
+  Maximize, AlertCircle
 } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
 import { getApiBase } from "../../../lib/apiBase";
@@ -25,14 +25,10 @@ const statusBadgeClass = (status: string | undefined) => {
   }
 };
 
-const labelStatus = (status: string | undefined) => {
-  const labels: Record<string, string> = {
-    draft: 'Borrador', sent: 'Enviada', approved: 'Aprobada',
-    won: 'Aprobada', rejected: 'Rechazada', lost: 'Rechazada',
-    expired: 'Vencida', archived: 'Archivada'
-  };
-  return labels[status?.toLowerCase() || 'draft'] || 'Borrador';
-};
+const DEFAULT_TERMS = `• Validez de la oferta: 5 días hábiles.
+• Precios basados en el Incoterm seleccionado.
+• Sujeto a disponibilidad de espacio en aerolínea/naviera.
+• Incluye inspección fitosanitaria y pre-enfriamiento.`;
 
 interface CostLine { base: number; unitSale: number; label: string; tip: string; }
 interface CostState { [key: string]: CostLine; }
@@ -61,6 +57,7 @@ export default function AdminQuoteDetailPage() {
   const [color, setColor] = useState("");
   const [brix, setBrix] = useState("");
   const [caliber, setCaliber] = useState(""); 
+  const [termsConditions, setTermsConditions] = useState(DEFAULT_TERMS);
 
   const [costs, setCosts] = useState<CostState>({
     fruta: { base: 13.30, unitSale: 0, label: "Fruta (Base Cajas)", tip: "Precio de compra por caja." },
@@ -136,6 +133,7 @@ export default function AdminQuoteDetailPage() {
       setMode(q.mode || "AIR");
       setPlace(q.destination || "");
       setProductId(q.product_id || "");
+      setTermsConditions(q.terms || DEFAULT_TERMS);
       
       const det = q.product_details || {};
       setVariety(det.variety || "");
@@ -180,8 +178,13 @@ export default function AdminQuoteDetailPage() {
     try {
       const totalVentaCientifico = analysis.lines.reduce((acc, curr) => acc + curr.totalSaleRow, 0);
       const payload = {
-        total: totalVentaCientifico, status, mode, destination: place,
-        boxes: Number(boxes), weight_kg: Number(weightKg),
+        total: totalVentaCientifico, 
+        status, 
+        mode, 
+        destination: place,
+        boxes: Number(boxes), 
+        weight_kg: Number(weightKg),
+        terms: termsConditions,
         costs: {
           c_fruit: Number(costs.fruta.base), s_fruit: Number(costs.fruta.unitSale),
           c_freight: Number(costs.flete.base), s_freight: Number(costs.flete.unitSale),
@@ -215,7 +218,9 @@ export default function AdminQuoteDetailPage() {
       setToast("Sesión expirada");
       return;
     }
-    const pdfUrl = `${getApiBase()}/.netlify/functions/renderQuotePdf?id=${id}&lang=es&variant=2&token=${session.access_token}&t=${Date.now()}`;
+    // EL FIX: El nombre debe ser RenderQuotePdf (exactamente como el archivo .tsx)
+    // Se eliminan las minúsculas 'renderquote' que tenías antes
+    const pdfUrl = `${getApiBase()}/.netlify/functions/RenderQuotePdf?id=${id}&token=${session.access_token}&t=${Date.now()}`;
     window.open(pdfUrl, '_blank');
   };
 
@@ -354,6 +359,22 @@ export default function AdminQuoteDetailPage() {
           </div>
         </div>
 
+        {/* --- NUEVA SECCIÓN: TÉRMINOS Y CONDICIONES --- */}
+        <div className="ff-card" style={{ borderLeft: '4px solid #f59e0b' }}>
+          <div className="table-h" style={{ color: '#b45309' }}>
+            <AlertCircle size={18}/> <span>Términos y Condiciones (Visibles en PDF)</span>
+          </div>
+          <textarea
+            className="terms-editor"
+            value={termsConditions}
+            onChange={(e) => setTermsConditions(e.target.value)}
+            placeholder="Escribe aquí las condiciones de esta oferta..."
+          />
+          <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '10px', fontStyle: 'italic' }}>
+            * Estos términos aparecerán en la parte inferior del PDF generado. Cada salto de línea se respeta en el documento.
+          </div>
+        </div>
+
         {toast && <div className="toast">{toast}</div>}
       </div>
 
@@ -407,6 +428,25 @@ export default function AdminQuoteDetailPage() {
         .stat.featured b { color: white; }
         .toast { position: fixed; bottom: 30px; right: 30px; background: #1e293b; color: white; padding: 12px 25px; border-radius: 10px; z-index: 100; box-shadow: 0 10px 15px rgba(0,0,0,0.2); }
         .spin { animation: spin 1s linear infinite; }
+        
+        .terms-editor {
+          width: 100%;
+          min-height: 100px;
+          border: 1px solid #e2e8f0;
+          border-radius: 8px;
+          padding: 12px;
+          font-size: 13px;
+          color: #475569;
+          line-height: 1.5;
+          outline: none;
+          resize: vertical;
+          background: #fffbeb;
+        }
+        .terms-editor:focus {
+          border-color: #f59e0b;
+          box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.1);
+        }
+
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .no-spin::-webkit-inner-spin-button, .no-spin::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
       `}</style>

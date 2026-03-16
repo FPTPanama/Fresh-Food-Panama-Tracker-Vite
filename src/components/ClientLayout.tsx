@@ -1,111 +1,142 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import { getApiBase } from "../lib/apiBase";
 import { useUILang } from "../lib/uiLanguage";
-import { 
+import {
   Package, Globe, ChevronDown, LogOut, Search, Loader2,
-  UserCircle2, FileText, Users, ArrowRight, Ship, User
+  UserCircle2, FileText, CheckCircle2, AlertCircle, ArrowRight, Ship
 } from "lucide-react";
 
 const LOGO_SRC = "/brand/freshfood-logo.svg";
 
-type Me = { email: string | null; role: string | null; loading: boolean };
-type SearchResult = { id: string; type: 'shipment' | 'quote' | 'user'; label: string; sub: string };
+// Sistema de notificaciones similar al Admin
+export let notify: (msg: string, type?: 'success' | 'error') => void = () => {};
 
-export function ClientLayout({
-  title,
-  subtitle,
-  children,
-  wide = true,
-}: {
-  title?: string;
-  subtitle?: string;
-  children: React.ReactNode;
-  wide?: boolean;
-}) {
-  const location = useLocation();
+type SearchResult = { 
+  id: string; 
+  type: 'shipment' | 'quote' | 'user'; 
+  label: string; 
+  sub: string;
+  status?: string; 
+};
+
+export function ClientLayout({ title, subtitle, children, wide = true }: { title?: string; subtitle?: string; children: React.ReactNode; wide?: boolean }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { lang, toggle } = useUILang();
-
-  const [me, setMe] = useState<Me>({ email: null, role: null, loading: true });
+  
+  const [me, setMe] = useState<{ email: string | null; role: string | null }>({ email: null, role: null });
   const [menuOpen, setMenuOpen] = useState(false);
+  const [toast, setToast] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
+  
   const [globalQuery, setGlobalQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  
+
   const menuRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLDivElement | null>(null);
 
+  notify = (msg, type = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  // Navegación fija para clientes (sin colapsar)
   const nav = useMemo(() => [
-    { href: "/admin/shipments", label: lang === "es" ? "Embarques" : "Shipments", icon: Package },
-    { href: "/admin/quotes", label: lang === "es" ? "Cotizaciones" : "Quotes", icon: FileText },
-    { href: "/admin/users", label: lang === "es" ? "Directorio" : "Directory", icon: Users },
+    { 
+      href: "/shipments", 
+      label: lang === "es" ? "Mis Envíos" : "My Shipments", 
+      icon: Ship 
+    },
+    { 
+      href: "/profile", 
+      label: lang === "es" ? "Mi Perfil" : "My Profile", 
+      icon: UserCircle2 
+    },
   ], [lang]);
 
+  // Búsqueda global (filtrada para lo que el cliente puede ver)
   const handleGlobalSearch = async (val: string) => {
     setGlobalQuery(val);
     if (val.length < 2) { setSearchResults([]); return; }
-    
     setIsSearching(true);
-    try {
-      // 360 Search: Embarques, Cotizaciones y Usuarios
-      const [shipRes, quoteRes, userRes] = await Promise.all([
-        supabase.from('shipments').select('id, file_number, client_name').ilike('file_number', `%${val}%`).limit(2),
-        supabase.from('quotes').select('id, quote_number, client_name').ilike('quote_number', `%${val}%`).limit(2),
-        supabase.from('profiles').select('id, full_name, email').ilike('full_name', `%${val}%`).limit(2)
-      ]);
 
-      const formatted: SearchResult[] = [
-        ...(shipRes.data || []).map(s => ({ id: s.id, type: 'shipment' as const, label: s.file_number, sub: s.client_name })),
-        ...(quoteRes.data || []).map(q => ({ id: q.id, type: 'quote' as const, label: q.quote_number, sub: q.client_name })),
-        ...(userRes.data || []).map(u => ({ id: u.id, type: 'user' as const, label: u.full_name, sub: u.email }))
-      ];
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      // Solo buscamos embarques del propio cliente
+      const { data: shipRes } = await supabase.from('shipments')
+        .select('id, code, destination, status')
+        .or(`code.ilike.%${val}%,destination.ilike.%${val}%`)
+        .limit(5);
+
+      const formatted: SearchResult[] = (shipRes || []).map(s => ({ 
+        id: s.id, 
+        type: 'shipment' as const, 
+        label: s.code || 'Embarque', 
+        sub: s.destination || 'Sin destino',
+        status: s.status 
+      }));
+      
       setSearchResults(formatted);
-    } catch (e) {
-      console.error("Search error", e);
-    } finally {
-      setIsSearching(false);
+    } catch (e) { 
+      console.error("Error search:", e); 
+    } finally { 
+      setIsSearching(false); 
     }
   };
 
   useEffect(() => {
-    const onDocClick = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
-      if (searchRef.current && !searchRef.current.contains(e.target as Node)) setGlobalQuery("");
+    const onDoc = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as any)) setMenuOpen(false);
+      if (searchRef.current && !searchRef.current.contains(e.target as any)) setGlobalQuery("");
     };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
   useEffect(() => {
-    let mounted = true;
     (async () => {
       const { data } = await supabase.auth.getSession();
       if (!data.session) { navigate("/login"); return; }
-      try {
-        const res = await fetch(`${getApiBase()}/.netlify/functions/getMyProfile`, {
-          headers: { Authorization: `Bearer ${data.session.access_token}` },
-        });
+      const res = await fetch(`${getApiBase()}/.netlify/functions/getMyProfile`, {
+        headers: { Authorization: `Bearer ${data.session.access_token}` },
+      });
+      if (res.ok) {
         const json = await res.json();
-        if (mounted) setMe({ email: json.email, role: json.role, loading: false });
-      } catch { if (mounted) setMe(prev => ({ ...prev, loading: false })); }
+        setMe({ email: json.email ?? null, role: json.role ?? null });
+      }
     })();
-    return () => { mounted = false; };
   }, [navigate]);
 
   return (
     <div className="ff-app">
+      {/* Toast de notificaciones */}
+      {toast && (
+        <div className={`ff-toast ${toast.type}`} style={{ position: 'fixed', top: '20px', right: '20px', zIndex: 9999, display: 'flex', gap: '10px', padding: '12px 20px', borderRadius: '12px', background: 'white', boxShadow: '0 10px 30px rgba(0,0,0,0.1)', border: '1px solid #eee' }}>
+          {toast.type === 'success' ? <CheckCircle2 size={18} color="#234d23"/> : <AlertCircle size={18} color="#ef4444"/>}
+          <span style={{ fontWeight: 600, fontSize: '13px' }}>{toast.msg}</span>
+        </div>
+      )}
+
       <header className="ff-top">
         <div className="ff-top__inner">
           <div className="ff-top__left">
-            <img src={LOGO_SRC} alt="Logo" width={32} height={32} className="ff-top__logo" style={{cursor:'pointer'}} onClick={() => navigate('/admin/shipments')} />
-            
-            <div className="ff-search-container" ref={searchRef}>
-              <div className={`ff-search-box ${globalQuery ? 'is-active' : ''}`}>
-                <Search size={16} className="ff-search-icon" />
+            <img src={LOGO_SRC} alt="FF" className="ff-top__logo" onClick={() => navigate('/shipments')} style={{cursor:'pointer'}} />
+            <div className="ff-top__titleWrap">
+              <h1 className="ff-top__title">{title || "Fresh Food Panamá"}</h1>
+              {subtitle && <div className="ff-top__sub">{subtitle}</div>}
+            </div>
+          </div>
+
+          <div className="ff-top__right">
+            {/* Buscador integrado estilo Admin pero con visual de Cliente */}
+            <div className="ff-global-search" ref={searchRef} style={{ position: 'relative' }}>
+              <div className="ff-search-pill" style={{ display: 'flex', alignItems: 'center', background: '#f1f5f9', borderRadius: '10px', padding: '0 12px', height: '36px', width: globalQuery ? '260px' : '200px', transition: '0.3s' }}>
+                <Search size={14} color="#64748b" />
                 <input 
-                  placeholder={lang === 'es' ? "Buscar ID, Cliente o Usuario..." : "Search ID, Client or User..."}
+                  style={{ border: 'none', background: 'none', outline: 'none', padding: '0 8px', fontSize: '12px', width: '100%' }}
+                  placeholder={lang === 'es' ? "Buscar envío..." : "Search shipment..."}
                   value={globalQuery}
                   onChange={(e) => handleGlobalSearch(e.target.value)}
                 />
@@ -113,49 +144,42 @@ export function ClientLayout({
               </div>
               
               {globalQuery.length >= 2 && (
-                <div className="ff-search-dropdown animate-fade-in">
-                  {searchResults.length > 0 ? searchResults.map(res => (
-                    <button key={res.id} className="ff-search-item" onClick={() => {
-                      const path = res.type === 'shipment' ? 'shipments' : res.type === 'quote' ? 'quotes' : 'users';
-                      navigate(`/admin/${path}/${res.id}`);
-                      setGlobalQuery("");
-                    }}>
-                      <div className={`res-icon ${res.type}`}>
-                        {res.type === 'shipment' ? <Ship size={12}/> : res.type === 'quote' ? <FileText size={12}/> : <User size={12}/>}
+                <div className="ff-search-results animate-fade-in" style={{ position: 'absolute', top: '110%', right: 0, width: '300px', background: 'white', borderRadius: '12px', border: '1px solid #eee', boxShadow: '0 10px 30px rgba(0,0,0,0.1)', overflow: 'hidden', zIndex: 100 }}>
+                  {searchResults.length > 0 ? searchResults.map((res) => (
+                    <button key={res.id} className="res-item" style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '10px', padding: '10px', border: 'none', background: 'none', cursor: 'pointer', borderBottom: '1px solid #f8fafc' }}
+                      onClick={() => { navigate(`/shipments/${res.id}`); setGlobalQuery(""); }}>
+                      <div className="res-tag shipment" style={{ background: '#eff6ff', color: '#3b82f6', padding: '6px', borderRadius: '6px' }}><Ship size={14}/></div>
+                      <div style={{ textAlign: 'left' }}>
+                        <div style={{ fontSize: '12px', fontWeight: 700 }}>{res.label}</div>
+                        <div style={{ fontSize: '10px', color: '#94a3b8' }}>{res.sub}</div>
                       </div>
-                      <div className="res-content">
-                        <span className="res-title">{res.label || 'S/N'}</span>
-                        <span className="res-sub">{res.sub || 'N/A'}</span>
-                      </div>
-                      <ArrowRight size={14} className="res-arrow" />
                     </button>
-                  )) : !isSearching && <div className="ff-search-empty">Sin resultados</div>}
+                  )) : !isSearching && <div style={{ padding: '15px', fontSize: '12px', color: '#94a3b8' }}>No se encontraron envíos</div>}
                 </div>
               )}
             </div>
-          </div>
 
-          <div className="ff-top__right">
-            <button type="button" className="ff-chip-lang" onClick={toggle}>
+            <button type="button" className="ff-chip" onClick={toggle}>
               <Globe size={14} /> <span>{lang.toUpperCase()}</span>
             </button>
 
             <div className="ff-user" ref={menuRef}>
               <button type="button" className="ff-user__btn" onClick={() => setMenuOpen(!menuOpen)}>
-                <div className="ff-user__avatar">{me.email?.charAt(0).toUpperCase() || <UserCircle2 size={16}/>}</div>
-                <span className="ff-user__email">{me.loading ? '...' : me.email?.split('@')[0]}</span>
-                <ChevronDown size={14} className={menuOpen ? 'rotate' : ''} />
+                <UserCircle2 size={18} color="var(--ff-green)" />
+                <span className="ff-user__email">{me.email?.split('@')[0] ?? "Usuario"}</span>
+                <ChevronDown size={14} style={{ transform: menuOpen ? 'rotate(180deg)' : 'none', transition: '0.2s' }} />
               </button>
               {menuOpen && (
                 <div className="ff-user__menu animate-fade-in">
-                  <div className="ff-user__header">
-                    <p className="ff-user__metaEmail">{me.email}</p>
-                    <p className="ff-user__metaRole">{me.role?.toUpperCase() || 'STAFF'}</p>
+                  <div className="ff-user__meta" style={{ padding: '12px', borderBottom: '1px solid #eee' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 700 }}>{me.email}</div>
+                    <div style={{ fontSize: '10px', color: 'var(--ff-muted)' }}>{me.role?.toUpperCase() || 'CLIENTE'}</div>
                   </div>
-                  <div className="ff-user__sep" />
-                  <button className="ff-user__item" onClick={() => navigate("/profile")}><UserCircle2 size={16} /><span>Perfil</span></button>
-                  <button className="ff-user__item danger" onClick={async () => { await supabase.auth.signOut(); navigate("/login"); }}>
-                    <LogOut size={16} /><span>Cerrar Sesión</span>
+                  <button type="button" className="ff-user__item" onClick={() => navigate("/profile")}>
+                    <UserCircle2 size={16} /> <span>Perfil</span>
+                  </button>
+                  <button type="button" className="ff-user__item danger" onClick={async () => { await supabase.auth.signOut(); navigate("/login"); }}>
+                    <LogOut size={16} /> <span>Cerrar sesión</span>
                   </button>
                 </div>
               )}
@@ -168,12 +192,11 @@ export function ClientLayout({
         <nav className="ff-side__nav">
           {nav.map((n) => {
             const Icon = n.icon;
-            const isActive = location.pathname.startsWith(n.href);
+            const active = location.pathname.startsWith(n.href);
             return (
-              <Link key={n.href} to={n.href} className={`ff-side__item ${isActive ? "is-active" : ""}`}>
+              <Link key={n.href} to={n.href} className={`ff-side__item ${active ? "is-active" : ""}`}>
                 <Icon size={18} />
-                <span>{n.label}</span>
-                {isActive && <div className="ff-side__active-line" />}
+                <span className="ff-side__lbl">{n.label}</span>
               </Link>
             );
           })}
@@ -181,42 +204,17 @@ export function ClientLayout({
       </aside>
 
       <main className="ff-main">
-        <div className={`ff-content ${wide ? "ff-content--wide" : ""}`}>{children}</div>
+        <div className={`ff-content ${wide ? "ff-content--wide" : ""}`}>
+          {children}
+        </div>
       </main>
 
       <style>{`
-        .ff-app { display: grid; grid-template-areas: "top top" "side main"; grid-template-columns: 240px 1fr; grid-template-rows: 64px 1fr; height: 100vh; font-family: sans-serif; }
-        .ff-top { grid-area: top; background: white; border-bottom: 1px solid #f1f5f9; padding: 0 24px; z-index: 100; }
-        .ff-top__inner { height: 100%; display: flex; align-items: center; justify-content: space-between; }
-        .ff-top__left { display: flex; align-items: center; gap: 20px; flex: 1; }
-        
-        .ff-search-container { position: relative; width: 100%; max-width: 400px; }
-        .ff-search-box { display: flex; align-items: center; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 0 12px; transition: 0.2s; }
-        .ff-search-box:focus-within { background: white; border-color: #94a3b8; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
-        .ff-search-box input { border: none; background: none; outline: none; padding: 10px; font-size: 13px; width: 100%; }
-        
-        .ff-search-dropdown { position: absolute; top: calc(100% + 8px); left: 0; right: 0; background: white; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); z-index: 200; overflow: hidden; }
-        .ff-search-item { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px; border: none; background: none; cursor: pointer; border-bottom: 1px solid #f8fafc; }
-        .ff-search-item:hover { background: #f8fafc; }
-        
-        .res-icon { width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
-        .res-icon.shipment { background: #eff6ff; color: #3b82f6; }
-        .res-icon.quote { background: #f0fdf4; color: #22c55e; }
-        .res-icon.user { background: #fef2f2; color: #ef4444; }
-        .res-content { flex: 1; text-align: left; }
-        .res-title { display: block; font-size: 13px; font-weight: 700; color: #1e293b; }
-        .res-sub { font-size: 11px; color: #94a3b8; }
-
-        .ff-side { grid-area: side; background: white; border-right: 1px solid #f1f5f9; padding: 20px 12px; }
-        .ff-side__item { display: flex; align-items: center; gap: 12px; padding: 12px 16px; color: #64748b; text-decoration: none; border-radius: 10px; font-size: 14px; margin-bottom: 4px; position: relative; }
-        .ff-side__item.is-active { background: #f1f5f9; color: #0f172a; font-weight: 700; }
-        .ff-side__active-line { position: absolute; left: 0; top: 12px; bottom: 12px; width: 3px; background: #0f172a; border-radius: 0 4px 4px 0; }
-        
-        .ff-user__avatar { width: 28px; height: 28px; background: #0f172a; color: white; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; }
         .ff-spin { animation: spin 1s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        .animate-fade-in { animation: fadeIn 0.2s ease-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in { animation: fadeIn 0.2s ease-out; }
+        .res-item:hover { background: #f1f5f9 !important; }
       `}</style>
     </div>
   );
