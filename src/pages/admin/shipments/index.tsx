@@ -114,21 +114,21 @@ export default function AdminShipments() {
         <div className="stats-dashboard">
           <div className="metric-card">
             <div className="metric-content">
-              <span className="metric-label">Total Activos</span>
+              <span className="metric-label">Total Activos     </span>
               <span className="value">{items.length}</span>
             </div>
             <div className="metric-icon blue"><LayoutGrid size={24} /></div>
           </div>
           <div className="metric-card">
             <div className="metric-content">
-              <span className="metric-label">En Tránsito</span>
+              <span className="metric-label">En Tránsito     </span>
               <span className="value">{items.filter(i => i.status?.includes('TRANSIT') || i.status?.includes('DEPARTED')).length}</span>
             </div>
             <div className="metric-icon orange"><Truck size={24} /></div>
           </div>
           <div className="metric-card">
             <div className="metric-content">
-              <span className="metric-label">KPI Operativo</span>
+              <span className="metric-label">KPI Operativo     </span>
               <span className="value">98%</span>
             </div>
             <div className="metric-icon slate"><TrendingUp size={24} /></div>

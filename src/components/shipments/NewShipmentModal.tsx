@@ -33,13 +33,12 @@ export function NewShipmentModal({ isOpen, onClose, onSuccess, initialClientId }
     destination: "",
     boxes: "",
     pallets: "",
-    weight: "",
-    incoterm: "FOB"
+    incoterm: "FOB" // Mantengo FOB como inicial según tu estado
   });
 
   useEffect(() => {
     if (!isOpen) {
-      setForm({ mode: "AIR", productId: "", varietyId: "", destination: "", boxes: "", pallets: "", weight: "", incoterm: "FOB" });
+      setForm({ mode: "AIR", productId: "", varietyId: "", destination: "", boxes: "", pallets: "", incoterm: "FOB" });
       setClientData(null);
       setSelectedClientId(null);
       setClientSearch("");
@@ -97,7 +96,6 @@ export function NewShipmentModal({ isOpen, onClose, onSuccess, initialClientId }
         incoterm: form.incoterm,
         boxes: parseInt(form.boxes) || 0,
         pallets: parseInt(form.pallets) || 0,
-        weight_kg: parseFloat(form.weight) || 0,
         product_name: selectedProd?.name,
         product_variety: selectedVar?.name,
         product_mode: form.mode === 'SEA' ? 'Marítima' : 'Aérea'
@@ -212,9 +210,16 @@ export function NewShipmentModal({ isOpen, onClose, onSuccess, initialClientId }
                 </button>
               </div>
 
-              <div className="input-field width-140">
-                <Hash size={16} className="field-icon" />
-                <input type="number" placeholder="Peso Kg" value={form.weight} onChange={e => setForm({...form, weight: e.target.value})} />
+              {/* REEMPLAZO: PESO POR INCOTERM */}
+              <div className="input-field width-140 has-label">
+                <span className="field-label">INCOTERM</span>
+                <select value={form.incoterm} onChange={e => setForm({...form, incoterm: e.target.value})}>
+                  <option>CIP</option>
+                  <option>FOB</option>
+                  <option>CFR</option>
+                  <option>DDP</option>
+                </select>
+                <ChevronDown size={14} className="field-arrow" />
               </div>
 
               <div className="input-field flex-grow">
@@ -251,7 +256,6 @@ export function NewShipmentModal({ isOpen, onClose, onSuccess, initialClientId }
         .row-wrapper { display: flex; flex-direction: column; gap: 14px; position: relative; }
         .row-subtitle { font-size: 11px; font-weight: 800; color: #94a3b8; letter-spacing: 0.8px; text-transform: uppercase; }
 
-        /* BUSCADOR DE CLIENTES ORIGINAL */
         .search-client-container { position: relative; width: 100%; }
         .search-results-overlay { 
           position: absolute; top: 100%; left: 0; right: 0; background: white; 
@@ -292,7 +296,8 @@ export function NewShipmentModal({ isOpen, onClose, onSuccess, initialClientId }
 
         .flex-3 { flex: 3; } .flex-grow { flex-grow: 1; } .width-140 { width: 140px; } .flex-1 { flex: 1.2; }
         .input-field.has-label { padding-top: 14px; }
-        .input-field.has-label input { padding-left: 15px; }
+        /* AJUSTE PARA EL SELECT DEL INCOTERM SIN ICONO IZQUIERDO */
+        .input-field.has-label select, .input-field.has-label input { padding-left: 15px; }
         .field-label { position: absolute; top: 8px; left: 15px; font-size: 9px; font-weight: 900; color: #94a3b8; text-transform: uppercase; pointer-events: none; }
         .disabled { background: #f8fafc; opacity: 0.6; pointer-events: none; }
 

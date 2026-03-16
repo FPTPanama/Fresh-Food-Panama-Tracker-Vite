@@ -16,6 +16,7 @@ const statusBadgeClass = (status: string | undefined) => {
   const s = status?.toLowerCase() || 'draft';
   const base = "pill ";
   switch (s) {
+    case 'solicitud': return base + "red"; // Color para nuevas solicitudes
     case 'draft': return base + "gray";
     case 'sent': return base + "blue";
     case 'approved': return base + "green";
@@ -72,10 +73,11 @@ export default function AdminQuoteDetailPage() {
 
   const headerInfo = useMemo(() => {
     if (!data) return { name: "Cargando...", tax: "...", code: "Q-2026-0000" };
+    // FIX: Intentar leer de la relación 'clients' o del 'client_snapshot' si es nueva
     return {
-      name: data.clients?.name || "Cliente no asignado",
-      tax: data.clients?.tax_id || "N/A",
-      code: data.quote_number || `Q-2026-XXXX`
+      name: data.clients?.name || data.client_snapshot?.name || "Cliente no asignado",
+      tax: data.clients?.tax_id || data.client_snapshot?.tax_id || "N/A",
+      code: data.quote_number || data.quote_no || `SOLICITUD`
     };
   }, [data]);
 
@@ -96,8 +98,8 @@ export default function AdminQuoteDetailPage() {
       let qty = 1;
       if (key === 'fruta') qty = boxes;
       if (key === 'flete') qty = weightKg;
-      const baseTotalCost = val.base * qty;
-      const totalSaleRow = val.unitSale * qty;
+      const baseTotalCost = (val.base || 0) * qty;
+      const totalSaleRow = (val.unitSale || 0) * qty;
       const currentMargin = totalSaleRow > 0 ? ((1 - (baseTotalCost / totalSaleRow)) * 100).toFixed(2) : "0.00";
       return { key, ...val, qty, baseTotalCost, totalSaleRow, margin: currentMargin };
     });
@@ -118,49 +120,57 @@ export default function AdminQuoteDetailPage() {
   const loadData = useCallback(async () => {
     if (!id) return;
     setLoading(true);
-    const [qRes, pRes] = await Promise.all([
-      supabase.from("quotes").select(`*, clients (*)`).eq("id", id).single(),
-      supabase.from("products").select("*")
-    ]);
+    try {
+      const [qRes, pRes] = await Promise.all([
+        supabase.from("quotes").select(`*, clients (*)`).eq("id", id).single(),
+        supabase.from("products").select("*")
+      ]);
 
-    if (pRes.data) setProducts(pRes.data);
-    if (qRes.data) {
-      const q = qRes.data;
-      setData(q);
-      setStatus(q.status || "draft");
-      setBoxes(q.boxes || 0);
-      setWeightKg(q.weight_kg || 0);
-      setMode(q.mode || "AIR");
-      setPlace(q.destination || "");
-      setProductId(q.product_id || "");
-      setTermsConditions(q.terms || DEFAULT_TERMS);
-      
-      const det = q.product_details || {};
-      setVariety(det.variety || "");
-      setColor(det.color || "");
-      setBrix(det.brix || "");
-      setCaliber(det.caliber || "");
+      if (pRes.data) setProducts(pRes.data);
+      if (qRes.data) {
+        const q = qRes.data;
+        setData(q);
+        setStatus(q.status || "draft");
+        setBoxes(Number(q.boxes || 0));
+        setWeightKg(Number(q.weight_kg || 0));
+        setMode(q.mode || "AIR");
+        setPlace(q.destination || "");
+        setProductId(q.product_id || "");
+        setTermsConditions(q.terms || DEFAULT_TERMS);
+        
+        const det = q.product_details || {};
+        setVariety(det.variety || "");
+        setColor(det.color || "");
+        setBrix(det.brix || "");
+        setCaliber(det.caliber || "");
 
-      if (q.product_id) {
-        const prod = pRes.data?.find(p => p.id === q.product_id);
-        setVarieties(prod?.variety ? (Array.isArray(prod.variety) ? prod.variety : [prod.variety]) : []);
+        if (q.product_id) {
+          const prod = pRes.data?.find(p => p.id === q.product_id);
+          setVarieties(prod?.variety ? (Array.isArray(prod.variety) ? prod.variety : [prod.variety]) : []);
+        }
+
+        // FIX: Blindaje absoluto en la carga de costos para evitar NaNs o Nulls
+        const c = q.costs || {};
+        setCosts({
+          fruta: { base: Number(c.c_fruit || 13.30), unitSale: Number(c.s_fruit || 0), label: "Fruta (Base Cajas)", tip: "Precio de compra." },
+          flete: { base: Number(c.c_freight || 0), unitSale: Number(c.s_freight || 0), label: "Flete Internacional", tip: "Costo por Kg." },
+          origen: { base: Number(c.c_origin || 0), unitSale: Number(c.s_origin || 0), label: "Gastos de Origen", tip: "Manejo local." },
+          aduana: { base: Number(c.c_aduana || 0), unitSale: Number(c.s_aduana || 0), label: "Gestión Aduanera", tip: "Corredor." },
+          inspeccion: { base: Number(c.c_insp || 0), unitSale: Number(c.s_insp || 0), label: "Inspecciones / Fiton", tip: "MIDA." },
+          itbms: { base: Number(c.c_itbms || 0), unitSale: Number(c.s_itbms || 0), label: "ITBMS / Tasas", tip: "Impuestos." },
+          handling: { base: Number(c.c_handling || 0), unitSale: Number(c.s_handling || 0), label: "Handling", tip: "Manejo carga." },
+          otros: { base: Number(c.c_other || 0), unitSale: Number(c.s_other || 0), label: "Otros Gastos", tip: "Extras." }
+        });
+
+        const m = q.totals?.meta || {};
+        setIncoterm(m.incoterm || "CIP");
+        setPallets(Number(m.pallets || 0));
       }
-      const c = q.costs || {};
-      setCosts({
-        fruta: { base: c.c_fruit || 0, unitSale: c.s_fruit || 0, label: "Fruta (Base Cajas)", tip: "Precio de compra." },
-        flete: { base: c.c_freight || 0, unitSale: c.s_freight || 0, label: "Flete Internacional", tip: "Costo por Kg." },
-        origen: { base: c.c_origin || 0, unitSale: c.s_origin || 0, label: "Gastos de Origen", tip: "Manejo local." },
-        aduana: { base: c.c_aduana || 0, unitSale: c.s_aduana || 0, label: "Gestión Aduanera", tip: "Corredor." },
-        inspeccion: { base: c.c_insp || 0, unitSale: c.s_insp || 0, label: "Inspecciones / Fiton", tip: "MIDA." },
-        itbms: { base: c.c_itbms || 0, unitSale: c.s_itbms || 0, label: "ITBMS / Tasas", tip: "Impuestos." },
-        handling: { base: c.c_handling || 0, unitSale: c.s_handling || 0, label: "Handling", tip: "Manejo carga." },
-        otros: { base: c.c_other || 0, unitSale: c.s_other || 0, label: "Otros Gastos", tip: "Extras." }
-      });
-      const m = q.totals?.meta || {};
-      setIncoterm(m.incoterm || "CIP");
-      setPallets(m.pallets || 0);
+    } catch (err) {
+      console.error("Error cargando detalle:", err);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, [id]);
 
   useEffect(() => {
@@ -218,8 +228,6 @@ export default function AdminQuoteDetailPage() {
       setToast("Sesión expirada");
       return;
     }
-    // EL FIX: El nombre debe ser renderQuotePdf (exactamente como el archivo .tsx)
-    // Se eliminan las minúsculas 'renderquote' que tenías antes
     const pdfUrl = `${getApiBase()}/.netlify/functions/renderQuotePdf?id=${id}&token=${session.access_token}&t=${Date.now()}`;
     window.open(pdfUrl, '_blank');
   };
@@ -236,9 +244,9 @@ export default function AdminQuoteDetailPage() {
               <div className="codeIcon"><FileText size={20} color="#166534" /></div>
               <div style={{ minWidth: 0 }}>
                 <div className="heroLabel">Identificador Único</div>
-                <div className="code">{data?.quote_number || 'S/N'}</div>
+                <div className="code">{headerInfo.code}</div>
                 <div className="productLine">
-                  <span style={{fontWeight: 600}}>{data?.clients?.name || 'Cliente no definido'}</span>
+                  <span style={{fontWeight: 600}}>{headerInfo.name}</span>
                 </div>
               </div>
             </div>
@@ -261,6 +269,7 @@ export default function AdminQuoteDetailPage() {
             <span className="pill green"><MapPin size={14}/> PTY <ArrowRight size={12} style={{margin: '0 4px'}}/> {place || 'Destino'}</span>
             <span className="pill blue"><Shield size={14}/> {incoterm}</span>
             <select className={statusBadgeClass(status)} value={status} onChange={(e) => setStatus(e.target.value)}>
+              <option value="Solicitud">Nueva Solicitud</option>
               <option value="draft">Borrador</option>
               <option value="sent">Enviada</option>
               <option value="approved">Aprobada</option>
@@ -359,7 +368,6 @@ export default function AdminQuoteDetailPage() {
           </div>
         </div>
 
-        {/* --- NUEVA SECCIÓN: TÉRMINOS Y CONDICIONES --- */}
         <div className="ff-card" style={{ borderLeft: '4px solid #f59e0b' }}>
           <div className="table-h" style={{ color: '#b45309' }}>
             <AlertCircle size={18}/> <span>Términos y Condiciones (Visibles en PDF)</span>
@@ -370,9 +378,6 @@ export default function AdminQuoteDetailPage() {
             onChange={(e) => setTermsConditions(e.target.value)}
             placeholder="Escribe aquí las condiciones de esta oferta..."
           />
-          <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '10px', fontStyle: 'italic' }}>
-            * Estos términos aparecerán en la parte inferior del PDF generado. Cada salto de línea se respeta en el documento.
-          </div>
         </div>
 
         {toast && <div className="toast">{toast}</div>}
@@ -393,12 +398,14 @@ export default function AdminQuoteDetailPage() {
         .kpi-box { text-align: right; }
         .kpi-val { display: block; font-size: 18px; font-weight: 900; color: #10b981; }
         .kpi-lab { font-size: 9px; font-weight: 800; color: #94a3b8; }
-        .pdf-link { background: #f8fafc; color: #64748b; border: 1px solid #e2e8f0; padding: 10px 18px; border-radius: 8px; font-weight: 700; display: flex; gap: 8px; align-items: center; text-decoration: none; border: 1px solid #e2e8f0; }
+        .pdf-link { background: #f8fafc; color: #64748b; border: 1px solid #e2e8f0; padding: 10px 18px; border-radius: 8px; font-weight: 700; display: flex; gap: 8px; align-items: center; text-decoration: none; }
         .btn-save { background: #10b981; color: white; border: none; padding: 10px 18px; border-radius: 8px; font-weight: 700; cursor: pointer; display: flex; gap: 8px; align-items: center; }
         .pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px; font-size: 11px; font-weight: 800; border: 1px solid transparent; }
         .pill.green { background: #f0fdf4; color: #166534; border-color: #bbf7d0; }
         .pill.blue { background: #eff6ff; color: #1e40af; border-color: #bfdbfe; }
+        .pill.red { background: #fee2e2; color: #b91c1c; border-color: #fecaca; }
         .pill.gray { background: #f8fafc; color: #475569; border-color: #e2e8f0; }
+        .pill.orange { background: #fff7ed; color: #c2410c; border-color: #ffedd5; }
         .strip { display: flex; gap: 20px; align-items: center; padding: 12px 20px; }
         .strip-label { width: 80px; font-size: 10px; font-weight: 900; color: #10b981; border-right: 1px solid #f1f5f9; }
         .strip.blue .strip-label { color: #3b82f6; }
@@ -428,25 +435,7 @@ export default function AdminQuoteDetailPage() {
         .stat.featured b { color: white; }
         .toast { position: fixed; bottom: 30px; right: 30px; background: #1e293b; color: white; padding: 12px 25px; border-radius: 10px; z-index: 100; box-shadow: 0 10px 15px rgba(0,0,0,0.2); }
         .spin { animation: spin 1s linear infinite; }
-        
-        .terms-editor {
-          width: 100%;
-          min-height: 100px;
-          border: 1px solid #e2e8f0;
-          border-radius: 8px;
-          padding: 12px;
-          font-size: 13px;
-          color: #475569;
-          line-height: 1.5;
-          outline: none;
-          resize: vertical;
-          background: #fffbeb;
-        }
-        .terms-editor:focus {
-          border-color: #f59e0b;
-          box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.1);
-        }
-
+        .terms-editor { width: 100%; min-height: 100px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; font-size: 13px; color: #475569; line-height: 1.5; outline: none; resize: vertical; background: #fffbeb; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .no-spin::-webkit-inner-spin-button, .no-spin::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
       `}</style>

@@ -9,6 +9,7 @@ import { getApiBase } from "../../../lib/apiBase";
 import { requireAdminOrRedirect } from "../../../lib/requireAdmin";
 import { AdminLayout } from "../../../components/AdminLayout";
 import { QuickQuoteModal } from "../../../components/quotes/QuickQuoteModal";
+import { usePendingRequests } from "../../../hooks/usePendingRequests"; // <--- IMPORTANTE: Verifica esta ruta
 
 // 1. DEFINICIÓN DE TIPOS
 type QuoteRow = {
@@ -53,6 +54,7 @@ const getFlag = (dest: string) => {
 
 const translateStatus = (s: string) => {
   const mapping: Record<string, string> = {
+    'solicitud': 'Nueva Solicitud',
     'draft': 'Borrador',
     'sent': 'Enviada',
     'approved': 'Aprobada',
@@ -91,6 +93,8 @@ export default function AdminQuotesIndex() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
+  const pendingCount = usePendingRequests(); // Hook de tiempo real
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
@@ -149,7 +153,14 @@ export default function AdminQuotesIndex() {
         {/* HEADER */}
         <div className="header-section">
           <div className="title-group">
-            <h1>Panel de Cotizaciones</h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <h1>Panel de Cotizaciones</h1>
+                {pendingCount > 0 && (
+                    <span className="live-request-badge">
+                        {pendingCount} SOLICITUDES
+                    </span>
+                )}
+            </div>
             <p>Monitorea el pipeline comercial y estados de envío</p>
           </div>
           <button className="btn-main-action" onClick={() => setIsModalOpen(true)}>
@@ -177,12 +188,16 @@ export default function AdminQuotesIndex() {
             <div className="metric-icon blue"><TrendingUp size={24} /></div>
           </div>
 
-          <div className="metric-card">
+          <div className={`metric-card highlight-card ${pendingCount > 0 ? 'active' : ''}`} 
+               onClick={() => setStatus(status === 'Solicitud' ? '' : 'Solicitud')}
+               style={{ cursor: 'pointer' }}>
             <div className="metric-content">
-              <span className="metric-label">Total Cotizaciones</span>
-              <span className="value">{stats.countTotal}</span>
+              <span className="metric-label">Solicitudes Pendientes</span>
+              <span className="value">{pendingCount}</span>
             </div>
-            <div className="metric-icon slate"><FileText size={24} /></div>
+            <div className={`metric-icon ${pendingCount > 0 ? 'red-pulse' : 'slate'}`}>
+                <AlertCircle size={24} />
+            </div>
           </div>
 
           <div className="metric-card">
@@ -207,13 +222,13 @@ export default function AdminQuotesIndex() {
           </div>
 
           <div className="quick-filters">
-            {['draft', 'sent', 'approved'].map(s => (
+            {['Solicitud', 'draft', 'sent', 'approved'].map(s => (
               <button 
                 key={s}
-                className={`filter-pill ${status === s ? 'active' : ''}`}
+                className={`filter-pill ${status === s ? 'active' : ''} ${s === 'Solicitud' && pendingCount > 0 ? 'has-pending' : ''}`}
                 onClick={() => setStatus(status === s ? "" : s)}
               >
-                {s === 'draft' ? 'Borrador' : s === 'sent' ? 'Enviada' : 'Aprobada'}
+                {translateStatus(s)}
               </button>
             ))}
           </div>
@@ -223,38 +238,40 @@ export default function AdminQuotesIndex() {
           </button>
         </div>
 
-        {/* LISTADO REDISEÑADO */}
+        {/* LISTADO */}
         <div className="quotes-list-container">
           {loading ? (
-            // Renderizamos 5 skeletons mientras carga
             <>
-              <QuoteSkeleton />
-              <QuoteSkeleton />
-              <QuoteSkeleton />
-              <QuoteSkeleton />
-              <QuoteSkeleton />
+              <QuoteSkeleton /><QuoteSkeleton /><QuoteSkeleton />
             </>
           ) : (
             items.map((r) => {
+              const isRequest = r.status === 'Solicitud';
               const firstItem = r.items_snapshot?.[0];
               const productInfo = firstItem ? `${firstItem.product} ${firstItem.variety || ''}` : 'Varios productos';
               
               return (
-                <div key={r.id} className="quote-row-item" onClick={() => navigate(`/admin/quotes/${r.id}`)}>
-                  
-                  {/* Col 1: ID, Producto y Cajas */}
+                <div 
+  key={r.id} 
+  className={`quote-row-item ${isRequest ? 'is-request-row' : ''}`} 
+  onClick={() => {
+    if (r.id) {
+      navigate(`/admin/quotes/${r.id}`);
+    } else {
+      console.error("Error: La fila no tiene un ID válido", r);
+    }
+  }}
+> 
                   <div className="col-ident">
-                    <span className="id-number">{r.quote_number || r.quote_no || 'S/N'}</span>
+                    <span className="id-number">{isRequest ? 'NUEVA' : (r.quote_number || r.quote_no || 'S/N')}</span>
                     <span className="product-variety">{productInfo}</span>
-                    <span className="badge-boxes">{r.boxes || 0} CAJAS</span>
+                    <span className={`badge-boxes ${isRequest ? 'request' : ''}`}>{r.boxes || 0} CAJAS</span>
                   </div>
 
-                  {/* Col 2: Cliente */}
                   <div className="col-client">
                     <span className="client-name">{r.client_name || r.client_snapshot?.name || 'Cliente sin nombre'}</span>
                   </div>
 
-                  {/* Col 3: Ruta Visual */}
                   <div className="col-route">
                     <div className="route-timeline">
                       <span className="flag">🇵🇦</span>
@@ -269,14 +286,16 @@ export default function AdminQuotesIndex() {
                     </div>
                   </div>
 
-                  {/* Col 4: Monto (Peso Visual Ligero) */}
                   <div className="col-amount">
                     <span className="amount-val">
-                      <small>USD</small> {(r.total_amount || r.total || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      {isRequest ? (
+                          <span className="pending-price">Pendiente</span>
+                      ) : (
+                        <><small>USD</small> {(r.total_amount || r.total || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</>
+                      )}
                     </span>
                   </div>
 
-                  {/* Col 5: Status y Acción */}
                   <div className="col-status">
                     <StatusPill v={r.status} />
                     <ChevronRight size={20} className="entry-chevron" />
@@ -303,6 +322,11 @@ export default function AdminQuotesIndex() {
         .title-group h1 { font-size: 28px; font-weight: 700; color: #0f172a; margin: 0; }
         .title-group p { color: #64748b; font-size: 14px; margin-top: 4px; }
 
+        .live-request-badge { 
+            background: #ef4444; color: white; font-size: 10px; font-weight: 900; 
+            padding: 4px 12px; border-radius: 50px; animation: pulse-small 2s infinite; 
+        }
+
         .btn-main-action { 
           background: #0f172a; color: white; border: none; padding: 12px 24px; border-radius: 12px; 
           font-weight: 600; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: 0.2s;
@@ -310,21 +334,26 @@ export default function AdminQuotesIndex() {
         .btn-main-action:hover { background: #1e293b; transform: translateY(-1px); }
 
         .stats-dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 40px; }
-        .metric-card { background: white; padding: 20px; border-radius: 16px; border: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; }
+        .metric-card { background: white; padding: 20px; border-radius: 16px; border: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; transition: 0.3s; }
+        .highlight-card.active { border: 2px solid #ef4444; background: #fff1f2; }
         .metric-label { font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
         .metric-card .value { font-size: 24px; font-weight: 700; color: #0f172a; }
         .metric-icon { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; }
         .metric-icon.blue { background: #eff6ff; color: #3b82f6; }
         .metric-icon.green { background: #f0fdf4; color: #10b981; }
         .metric-icon.slate { background: #f8fafc; color: #64748b; }
+        .red-pulse { background: #fee2e2; color: #ef4444; animation: pulse-small 2s infinite; }
 
         .filters-bar { display: flex; align-items: center; gap: 16px; margin-bottom: 25px; }
         .search-container { position: relative; flex: 1; }
         .search-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: #94a3b8; }
         .search-container input { width: 100%; padding: 10px 16px 10px 42px; border-radius: 12px; border: 1px solid #e2e8f0; background: white; font-size: 14px; outline: none; }
 
-        .filter-pill { padding: 8px 16px; border-radius: 10px; border: 1px solid #e2e8f0; background: white; font-size: 12px; font-weight: 700; color: #64748b; cursor: pointer; transition: 0.2s; }
+        .filter-pill { position: relative; padding: 8px 16px; border-radius: 10px; border: 1px solid #e2e8f0; background: white; font-size: 12px; font-weight: 700; color: #64748b; cursor: pointer; transition: 0.2s; }
         .filter-pill.active { background: #0f172a; color: white; border-color: #0f172a; }
+        .filter-pill.has-pending { border-color: #fca5a5; color: #b91c1c; }
+        .filter-pill.has-pending::after { content: ''; position: absolute; top: -3px; right: -3px; width: 8px; height: 8px; background: #ef4444; border-radius: 50%; border: 2px solid white; }
+
         .sort-toggle { background: white; border: 1px solid #e2e8f0; padding: 8px 14px; border-radius: 10px; display: flex; align-items: center; gap: 8px; font-weight: 600; color: #64748b; cursor: pointer; font-size: 12px; }
 
         .quotes-list-container { display: flex; flex-direction: column; gap: 10px; }
@@ -334,56 +363,35 @@ export default function AdminQuotesIndex() {
           cursor: pointer; transition: 0.2s ease;
         }
         .quote-row-item:hover { border-color: #cbd5e1; transform: translateX(4px); box-shadow: 0 4px 12px rgba(0,0,0,0.03); }
+        .is-request-row { background: #fff1f2 !important; border-color: #fecaca !important; }
 
         .col-ident { display: flex; flex-direction: column; gap: 2px; }
         .id-number { font-family: monospace; font-size: 11px; font-weight: 700; color: #1e293b; }
         .product-variety { font-size: 10px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .badge-boxes { background: #f0fdf4; color: #16a34a; font-size: 9px; font-weight: 800; padding: 1px 6px; border-radius: 4px; width: fit-content; margin-top: 4px; }
+        .badge-boxes.request { background: #fee2e2; color: #ef4444; }
 
         .client-name { font-size: 14px; font-weight: 600; color: #334155; }
-
         .route-timeline { display: flex; align-items: center; gap: 8px; background: #f8fafc; padding: 4px 12px; border-radius: 50px; width: fit-content; border: 1px solid #f1f5f9; }
-        .route-timeline .flag { font-size: 14px; }
-        .route-timeline .connector { display: flex; align-items: center; position: relative; width: 35px; }
-        .route-timeline .line { width: 100%; height: 1px; border-top: 2px dotted #e2e8f0; }
-        .route-timeline .mode-icon { position: absolute; left: 50%; transform: translateX(-50%); background: #f8fafc; padding: 0 2px; color: #94a3b8; }
         .route-timeline .dest-text { font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; }
 
         .col-amount { text-align: right; padding-right: 20px; }
         .amount-val { font-size: 15px; font-weight: 500; color: #475569; }
-        .amount-val small { font-size: 10px; font-weight: 800; color: #94a3b8; margin-right: 2px; }
+        .pending-price { color: #ef4444; font-weight: 800; font-size: 11px; text-transform: uppercase; }
 
         .col-status { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
-        .entry-chevron { color: #cbd5e1; }
         
-        .loadingState { padding: 40px; text-align: center; color: #94a3b8; font-size: 14px; font-weight: 600; }
-        .errorBanner { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; padding: 12px 16px; border-radius: 14px; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; font-size: 13px; }
-
-        /* --- STYLES FOR SKELETON --- */
-        .skeleton-row { pointer-events: none; border-color: #f1f5f9 !important; }
-        .skel-line { height: 12px; background: #f1f5f9; border-radius: 4px; margin-bottom: 8px; position: relative; overflow: hidden; }
-        .skel-pill { height: 24px; background: #f1f5f9; border-radius: 50px; position: relative; overflow: hidden; }
-        
-        .skel-line::after, .skel-pill::after {
-          content: "";
-          position: absolute;
-          inset: 0;
-          transform: translateX(-100%);
-          background: linear-gradient(90deg, transparent, rgba(255,255,255,0.5), transparent);
-          animation: shimmer 1.5s infinite;
+        @keyframes pulse-small {
+          0% { transform: scale(1); }
+          50% { transform: scale(1.05); }
+          100% { transform: scale(1); }
         }
 
-        @keyframes shimmer {
-          100% { transform: translateX(100%); }
-        }
-
-        .w40 { width: 40%; }
-        .w50 { width: 50%; }
-        .w60 { width: 60%; }
-        .w70 { width: 70%; }
-        .w80 { width: 80%; }
-        .w100 { width: 100%; }
-
+        /* --- SKELETON STYLES --- */
+        .skeleton-row { pointer-events: none; opacity: 0.6; }
+        .skel-line { height: 12px; background: #f1f5f9; border-radius: 4px; margin-bottom: 8px; }
+        .skel-pill { height: 24px; background: #f1f5f9; border-radius: 50px; }
+        .w50 { width: 50%; } .w80 { width: 80%; } .w40 { width: 40%; } .w100 { width: 100%; } .w60 { width: 60%; } .w70 { width: 70%; }
       `}</style>
     </AdminLayout>
   );
@@ -392,6 +400,7 @@ export default function AdminQuotesIndex() {
 function StatusPill({ v }: { v: string }) {
   const s = String(v || "").toLowerCase();
   const colors: Record<string, any> = {
+    solicitud: { bg: "#ef4444", text: "#ffffff" },
     approved: { bg: "#dcfce7", text: "#166534" },
     sent: { bg: "#fff7ed", text: "#c2410c" },
     draft: { bg: "#f1f5f9", text: "#475569" }
