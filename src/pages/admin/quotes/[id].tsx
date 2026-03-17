@@ -11,12 +11,25 @@ import { requireAdminOrRedirect } from "../../../lib/requireAdmin";
 import { AdminLayout } from "../../../components/AdminLayout";
 import { LocationSelector } from "../../../components/LocationSelector";
 
-// --- FUNCIONES AUXILIARES ---
+// --- TRADUCCIONES PARA EL HISTORIAL ---
+const FIELD_LABELS: { [key: string]: string } = {
+  boxes: "Cajas",
+  weight_kg: "Peso (Kg)",
+  destination: "Destino",
+  status: "Estado",
+  total: "Total Cotización",
+  mode: "Modo",
+  terms: "Términos",
+  product_id: "Producto",
+  costs: "Costos/Precios",
+  product_details: "Especificaciones"
+};
+
 const statusBadgeClass = (status: string | undefined) => {
   const s = status?.toLowerCase() || 'draft';
   const base = "pill ";
   switch (s) {
-    case 'solicitud': return base + "red"; // Color para nuevas solicitudes
+    case 'solicitud': return base + "red";
     case 'draft': return base + "gray";
     case 'sent': return base + "blue";
     case 'approved': return base + "green";
@@ -45,6 +58,7 @@ export default function AdminQuoteDetailPage() {
   const [data, setData] = useState<any>(null);
   const [products, setProducts] = useState<any[]>([]);
   const [varieties, setVarieties] = useState<string[]>([]);
+  const [logs, setLogs] = useState<any[]>([]); // Estado para el historial
   
   const [status, setStatus] = useState("draft");
   const [boxes, setBoxes] = useState(0);
@@ -73,25 +87,12 @@ export default function AdminQuoteDetailPage() {
 
   const headerInfo = useMemo(() => {
     if (!data) return { name: "Cargando...", tax: "...", code: "Q-2026-0000" };
-    // FIX: Intentar leer de la relación 'clients' o del 'client_snapshot' si es nueva
     return {
       name: data.clients?.name || data.client_snapshot?.name || "Cliente no asignado",
       tax: data.clients?.tax_id || data.client_snapshot?.tax_id || "N/A",
       code: data.quote_number || data.quote_no || `SOLICITUD`
     };
   }, [data]);
-
-  const handleProductChange = (val: string) => {
-    setProductId(val);
-    const selectedProd = products.find(p => p.id === val);
-    if (selectedProd && selectedProd.variety) {
-      const vList = Array.isArray(selectedProd.variety) ? selectedProd.variety : [selectedProd.variety];
-      setVarieties(vList);
-    } else {
-      setVarieties([]);
-    }
-    setVariety(""); 
-  };
 
   const analysis = useMemo(() => {
     const lines = Object.entries(costs).map(([key, val]) => {
@@ -110,12 +111,15 @@ export default function AdminQuoteDetailPage() {
     return { lines, totalCost, totalSale, profit, perBox };
   }, [costs, boxes, weightKg]);
 
-  useEffect(() => {
-    (async () => {
-      const r = await requireAdminOrRedirect();
-      if (r.ok) setAuthOk(true);
-    })();
-  }, []);
+  const loadLogs = useCallback(async () => {
+    if (!id) return;
+    const { data: logsData } = await supabase
+      .from("quote_logs")
+      .select("*")
+      .eq("quote_id", id)
+      .order("created_at", { ascending: false });
+    if (logsData) setLogs(logsData);
+  }, [id]);
 
   const loadData = useCallback(async () => {
     if (!id) return;
@@ -137,7 +141,6 @@ export default function AdminQuoteDetailPage() {
         setPlace(q.destination || "");
         setProductId(q.product_id || "");
         setTermsConditions(q.terms || DEFAULT_TERMS);
-        
         const det = q.product_details || {};
         setVariety(det.variety || "");
         setColor(det.color || "");
@@ -149,7 +152,6 @@ export default function AdminQuoteDetailPage() {
           setVarieties(prod?.variety ? (Array.isArray(prod.variety) ? prod.variety : [prod.variety]) : []);
         }
 
-        // FIX: Blindaje absoluto en la carga de costos para evitar NaNs o Nulls
         const c = q.costs || {};
         setCosts({
           fruta: { base: Number(c.c_fruit || 13.30), unitSale: Number(c.s_fruit || 0), label: "Fruta (Base Cajas)", tip: "Precio de compra." },
@@ -166,12 +168,16 @@ export default function AdminQuoteDetailPage() {
         setIncoterm(m.incoterm || "CIP");
         setPallets(Number(m.pallets || 0));
       }
-    } catch (err) {
-      console.error("Error cargando detalle:", err);
-    } finally {
-      setLoading(false);
-    }
-  }, [id]);
+      loadLogs();
+    } catch (err) { console.error(err); } finally { setLoading(false); }
+  }, [id, loadLogs]);
+
+  useEffect(() => {
+    (async () => {
+      const r = await requireAdminOrRedirect();
+      if (r.ok) setAuthOk(true);
+    })();
+  }, []);
 
   useEffect(() => {
     if (authOk && id) loadData();
@@ -189,11 +195,8 @@ export default function AdminQuoteDetailPage() {
       const totalVentaCientifico = analysis.lines.reduce((acc, curr) => acc + curr.totalSaleRow, 0);
       const payload = {
         total: totalVentaCientifico, 
-        status, 
-        mode, 
-        destination: place,
-        boxes: Number(boxes), 
-        weight_kg: Number(weightKg),
+        status, mode, destination: place,
+        boxes: Number(boxes), weight_kg: Number(weightKg),
         terms: termsConditions,
         costs: {
           c_fruit: Number(costs.fruta.base), s_fruit: Number(costs.fruta.unitSale),
@@ -216,20 +219,22 @@ export default function AdminQuoteDetailPage() {
       const { error } = await supabase.from("quotes").update(payload).eq("id", id);
       if (error) throw error;
       setToast("¡Cotización guardada!");
+      loadLogs(); // Recargar historial después de guardar
       setTimeout(() => setToast(null), 3000);
-    } catch (err) {
-      setToast("Error al guardar");
-    } finally { setBusy(false); }
+    } catch (err) { setToast("Error al guardar"); } finally { setBusy(false); }
   }
 
   const handlePrintPdf = async () => {
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      setToast("Sesión expirada");
-      return;
-    }
-    const pdfUrl = `${getApiBase()}/.netlify/functions/renderQuotePdf?id=${id}&token=${session.access_token}&t=${Date.now()}`;
+    const pdfUrl = `${getApiBase()}/.netlify/functions/renderQuotePdf?id=${id}&token=${session?.access_token}&t=${Date.now()}`;
     window.open(pdfUrl, '_blank');
+  };
+
+  const handleProductChange = (val: string) => {
+    setProductId(val);
+    const selectedProd = products.find(p => p.id === val);
+    setVarieties(selectedProd?.variety ? (Array.isArray(selectedProd.variety) ? selectedProd.variety : [selectedProd.variety]) : []);
+    setVariety(""); 
   };
 
   if (loading) return <AdminLayout title="Cargando..."><div className="p-10 text-center"><Loader2 className="spin" /></div></AdminLayout>;
@@ -245,28 +250,17 @@ export default function AdminQuoteDetailPage() {
               <div style={{ minWidth: 0 }}>
                 <div className="heroLabel">Identificador Único</div>
                 <div className="code">{headerInfo.code}</div>
-                <div className="productLine">
-                  <span style={{fontWeight: 600}}>{headerInfo.name}</span>
-                </div>
+                <div className="productLine"><b>{headerInfo.name}</b></div>
               </div>
             </div>
           </div>
-
           <div className="heroRight">
             <div className="head-actions">
-              <div className="kpi-box">
-                <span className="kpi-val">USD {analysis.perBox.toFixed(2)}</span>
-                <span className="kpi-lab">PRECIO POR CAJA</span>
-              </div>
-              <button onClick={handlePrintPdf} className="pdf-link" style={{ cursor: 'pointer' }}>
-                <FileText size={18}/> PDF
-              </button>
-              <button className="btn-save" onClick={handleSave} disabled={busy}>
-                {busy ? <Loader2 size={18} className="spin"/> : <Save size={18}/>}
-                {busy ? 'Guardando...' : 'Guardar'}
-              </button>
+              <div className="kpi-box"><span className="kpi-val">USD {analysis.perBox.toFixed(2)}</span><span className="kpi-lab">PRECIO POR CAJA</span></div>
+              <button onClick={handlePrintPdf} className="pdf-link"><FileText size={18}/> PDF</button>
+              <button className="btn-save" onClick={handleSave} disabled={busy}>{busy ? <Loader2 size={18} className="spin"/> : <Save size={18}/>} {busy ? 'Guardando...' : 'Guardar'}</button>
             </div>
-            <span className="pill green"><MapPin size={14}/> PTY <ArrowRight size={12} style={{margin: '0 4px'}}/> {place || 'Destino'}</span>
+            <span className="pill green"><MapPin size={14}/> PTY <ArrowRight size={12}/> {place || 'Destino'}</span>
             <span className="pill blue"><Shield size={14}/> {incoterm}</span>
             <select className={statusBadgeClass(status)} value={status} onChange={(e) => setStatus(e.target.value)}>
               <option value="Solicitud">Nueva Solicitud</option>
@@ -274,53 +268,27 @@ export default function AdminQuoteDetailPage() {
               <option value="sent">Enviada</option>
               <option value="approved">Aprobada</option>
               <option value="rejected">Rechazada</option>
-              <option value="expired">Vencida</option>
             </select>
           </div>
         </div>
 
+        {/* --- FRAGMENTOS DE UI ORIGINALES --- */}
         <div className="ff-card strip">
           <div className="strip-label">CALIDAD</div>
           <div className="strip-grid">
-            <div className="f">
-              <label>Producto</label>
-              <select value={productId} onChange={e => handleProductChange(e.target.value)}>
-                <option value="">Seleccionar...</option>
-                {products.map(p => (<option key={p.id} value={p.id}>{p.name}</option>))}
-              </select>
-            </div>
-            <div className="f">
-              <label>Variedad</label>
-              <select value={variety} onChange={e => setVariety(e.target.value)}>
-                <option value="">Seleccionar...</option>
-                {varieties.map((v, i) => (<option key={i} value={v}>{v}</option>))}
-              </select>
-            </div>
-            <div className="f">
-              <label><Maximize size={10}/> Calibre</label>
-              <input placeholder="Ej: 6, 7, 8" value={caliber} onChange={e => setCaliber(e.target.value)} />
-            </div>
-            <div className="f"><label><Thermometer size={10}/> Color</label><input placeholder="2.75-3.25" value={color} onChange={e => setColor(e.target.value)} /></div>
-            <div className="f"><label><Droplets size={10}/> Brix</label><input placeholder="≥13" value={brix} onChange={e => setBrix(e.target.value)} /></div>
+            <div className="f"><label>Producto</label><select value={productId} onChange={e => handleProductChange(e.target.value)}><option value="">Seleccionar...</option>{products.map(p => (<option key={p.id} value={p.id}>{p.name}</option>))}</select></div>
+            <div className="f"><label>Variedad</label><select value={variety} onChange={e => setVariety(e.target.value)}><option value="">Seleccionar...</option>{varieties.map((v, i) => (<option key={i} value={v}>{v}</option>))}</select></div>
+            <div className="f"><label><Maximize size={10}/> Calibre</label><input value={caliber} onChange={e => setCaliber(e.target.value)} /></div>
+            <div className="f"><label><Thermometer size={10}/> Color</label><input value={color} onChange={e => setColor(e.target.value)} /></div>
+            <div className="f"><label><Droplets size={10}/> Brix</label><input value={brix} onChange={e => setBrix(e.target.value)} /></div>
           </div>
         </div>
 
         <div className="ff-card strip blue">
           <div className="strip-label">LOGÍSTICA</div>
           <div className="strip-grid">
-            <div className="f" style={{flex: 0.6}}>
-              <label>Modo</label>
-              <div className="toggle">
-                <button className={mode==='AIR'?'active':''} onClick={()=>setMode('AIR')}><Plane size={14}/></button>
-                <button className={mode==='SEA'?'active':''} onClick={()=>setMode('SEA')}><Ship size={14}/></button>
-              </div>
-            </div>
-            <div className="f" style={{flex: 0.6}}>
-              <label>Incoterm</label>
-              <select value={incoterm} onChange={e => setIncoterm(e.target.value)}>
-                <option value="EXW">EXW</option><option value="FOB">FOB</option><option value="CIP">CIP</option><option value="CIF">CIF</option><option value="DDP">DDP</option>
-              </select>
-            </div>
+            <div className="f" style={{flex: 0.6}}><label>Modo</label><div className="toggle"><button className={mode==='AIR'?'active':''} onClick={()=>setMode('AIR')}><Plane size={14}/></button><button className={mode==='SEA'?'active':''} onClick={()=>setMode('SEA')}><Ship size={14}/></button></div></div>
+            <div className="f" style={{flex: 0.6}}><label>Incoterm</label><select value={incoterm} onChange={e => setIncoterm(e.target.value)}><option value="EXW">EXW</option><option value="FOB">FOB</option><option value="CIP">CIP</option><option value="CIF">CIF</option><option value="DDP">DDP</option></select></div>
             <div className="f" style={{flex: 2}}><label>Destino</label><LocationSelector mode={mode} value={place} onChange={setPlace}/></div>
             <div className="f small"><label>Cajas</label><input type="number" className="no-spin" value={boxes} onChange={e => setBoxes(Number(e.target.value))}/></div>
             <div className="f small"><label>Pallets</label><input type="number" className="no-spin" value={pallets} onChange={e => setPallets(Number(e.target.value))}/></div>
@@ -331,30 +299,15 @@ export default function AdminQuoteDetailPage() {
         <div className="ff-card">
           <div className="table-h"><Calculator size={18} color="#16a34a"/> <span>Análisis Comercial</span></div>
           <table className="a-table">
-            <thead>
-              <tr>
-                <th align="left">CONCEPTO</th>
-                <th align="right">COSTO UNIT.</th>
-                <th align="center">CANT.</th>
-                <th align="right">P. UNIT. VENTA</th>
-                <th align="right">VENTA TOTAL</th>
-                <th align="center">MARGEN %</th>
-              </tr>
-            </thead>
+            <thead><tr><th align="left">CONCEPTO</th><th align="right">COSTO UNIT.</th><th align="center">CANT.</th><th align="right">P. UNIT. VENTA</th><th align="right">VENTA TOTAL</th><th align="center">MARGEN %</th></tr></thead>
             <tbody>
               {analysis.lines.map(l => (
                 <tr key={l.key}>
                   <td><div className="c-box"><b>{l.label}</b><span>{l.tip}</span></div></td>
-                  <td align="right">
-                    <input className="in no-spin" type="number" step="any" value={costs[l.key].base || ""} onChange={e => updateCostLine(l.key, 'base', e.target.value)} />
-                  </td>
+                  <td align="right"><input className="in no-spin" type="number" step="any" value={costs[l.key].base || ""} onChange={e => updateCostLine(l.key, 'base', e.target.value)} /></td>
                   <td align="center" style={{fontWeight: 800, color: '#64748b'}}>{l.qty}</td>
-                  <td align="right">
-                    <input className="in s no-spin" type="number" step="any" value={costs[l.key].unitSale || ""} onChange={e => updateCostLine(l.key, 'unitSale', e.target.value)} />
-                  </td>
-                  <td align="right" style={{fontWeight: 700, paddingRight: '10px'}}>
-                    ${l.totalSaleRow.toLocaleString(undefined, {minimumFractionDigits:2})}
-                  </td>
+                  <td align="right"><input className="in s no-spin" type="number" step="any" value={costs[l.key].unitSale || ""} onChange={e => updateCostLine(l.key, 'unitSale', e.target.value)} /></td>
+                  <td align="right" style={{fontWeight: 700}}>${l.totalSaleRow.toLocaleString(undefined, {minimumFractionDigits:2})}</td>
                   <td align="center"><span className="m-badge">{l.margin}%</span></td>
                 </tr>
               ))}
@@ -369,15 +322,59 @@ export default function AdminQuoteDetailPage() {
         </div>
 
         <div className="ff-card" style={{ borderLeft: '4px solid #f59e0b' }}>
-          <div className="table-h" style={{ color: '#b45309' }}>
-            <AlertCircle size={18}/> <span>Términos y Condiciones (Visibles en PDF)</span>
+          <div className="table-h" style={{ color: '#b45309' }}><AlertCircle size={18}/> <span>Términos y Condiciones (Visibles en PDF)</span></div>
+          <textarea className="terms-editor" value={termsConditions} onChange={(e) => setTermsConditions(e.target.value)} />
+        </div>
+
+        {/* --- NUEVO HISTORIAL DE ACTIVIDAD (LOGS) --- */}
+        <div className="ff-card">
+          <div className="table-h"><Package size={18} color="#64748b"/> <span>Historial de Actividad</span></div>
+          <div className="log-list">
+            {logs.length === 0 && <div className="no-logs">No hay cambios registrados aún.</div>}
+            {logs.map((log) => (
+              <div key={log.id} className="log-item-wrapper">
+                <div className="log-item">
+                  <div className="log-meta">
+                    <span className="log-user">{log.user_email?.split('@')[0] || 'Sistema'}</span>
+                    <span className="log-date">{new Date(log.created_at).toLocaleString('es-PA', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                  </div>
+                  <div className="log-action-area">
+                    <div className="ff-dot-wrapper">
+                      <div className="ff-step-dot is-active"><div className="ff-note-indicator-dot"></div></div>
+                      <div className="ff-note-tooltip ff-history-tooltip">
+                        <div className="ff-tooltip-tag">CAMBIOS REALIZADOS</div>
+                       <div className="ff-history-changes-grid">
+  {Object.entries(log.changes || {})
+    .filter(([key, val]: [string, any]) => typeof val.new !== 'object')
+    .map(([key, val]: [string, any]) => {
+      // Si son términos, no mostramos el texto largo
+      const isTerms = key === 'terms';
+      
+      return (
+        <div key={key} className="ff-history-row">
+          <span className="ff-history-label">{FIELD_LABELS[key] || key}</span>
+          <div className="ff-history-vals">
+            <span className="ff-history-old">
+              {isTerms ? "Texto anterior" : String(val.old ?? '—')}
+            </span>
+            <ArrowRight size={10} style={{ opacity: 0.5 }} />
+            <span className="ff-history-new">
+              {isTerms ? "Texto actualizado" : String(val.new ?? '—')}
+            </span>
           </div>
-          <textarea
-            className="terms-editor"
-            value={termsConditions}
-            onChange={(e) => setTermsConditions(e.target.value)}
-            placeholder="Escribe aquí las condiciones de esta oferta..."
-          />
+        </div>
+      );
+    })}
+</div>
+                        <div className="ff-tooltip-arrow"></div>
+                      </div>
+                    </div>
+                    <span className="log-summary-text">Actualizó {Object.keys(log.changes || {}).length} campos</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
 
         {toast && <div className="toast">{toast}</div>}
@@ -398,7 +395,7 @@ export default function AdminQuoteDetailPage() {
         .kpi-box { text-align: right; }
         .kpi-val { display: block; font-size: 18px; font-weight: 900; color: #10b981; }
         .kpi-lab { font-size: 9px; font-weight: 800; color: #94a3b8; }
-        .pdf-link { background: #f8fafc; color: #64748b; border: 1px solid #e2e8f0; padding: 10px 18px; border-radius: 8px; font-weight: 700; display: flex; gap: 8px; align-items: center; text-decoration: none; }
+        .pdf-link { background: #f8fafc; color: #64748b; border: 1px solid #e2e8f0; padding: 10px 18px; border-radius: 8px; font-weight: 700; display: flex; gap: 8px; align-items: center; text-decoration: none; cursor: pointer; }
         .btn-save { background: #10b981; color: white; border: none; padding: 10px 18px; border-radius: 8px; font-weight: 700; cursor: pointer; display: flex; gap: 8px; align-items: center; }
         .pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px; font-size: 11px; font-weight: 800; border: 1px solid transparent; }
         .pill.green { background: #f0fdf4; color: #166534; border-color: #bbf7d0; }
@@ -438,6 +435,36 @@ export default function AdminQuoteDetailPage() {
         .terms-editor { width: 100%; min-height: 100px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; font-size: 13px; color: #475569; line-height: 1.5; outline: none; resize: vertical; background: #fffbeb; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .no-spin::-webkit-inner-spin-button, .no-spin::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+
+        /* --- HISTORIAL Actividad --- */
+        .log-list { display: flex; flex-direction: column; }
+        .no-logs { padding: 20px; text-align: center; color: #94a3b8; font-size: 13px; }
+        .log-item-wrapper { position: relative; }
+        .log-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; background: #fff; border-bottom: 1px solid #f1f5f9; transition: 0.2s; }
+        .log-item:hover { background: #f8fafc; }
+        .log-meta { display: flex; flex-direction: column; }
+        .log-user { font-size: 12px; font-weight: 800; color: #1e293b; text-transform: capitalize; }
+        .log-date { font-size: 10px; color: #94a3b8; font-weight: 600; }
+        .log-action-area { display: flex; align-items: center; gap: 12px; }
+        .log-summary-text { font-size: 11px; font-weight: 700; color: #64748b; }
+
+        /* Tooltip Glass Apple Identity */
+        .ff-dot-wrapper { height: 14px; width: 14px; position: relative; display: flex; align-items: center; justify-content: center; }
+        .ff-step-dot { width: 8px; height: 8px; background: #e2e8f0; border-radius: 50%; transition: 0.4s; position: relative; }
+        .ff-step-dot.is-active { background: #166534; transform: scale(1.2); }
+        .ff-note-indicator-dot { position: absolute; top: -3px; right: -3px; width: 6px; height: 6px; background: #ea580c; border: 1.5px solid #fff; border-radius: 50%; }
+        .ff-note-tooltip { position: absolute; bottom: 25px; left: 50%; transform: translateX(-50%) translateY(10px); width: 280px; background: #1e293b; padding: 14px; border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3); z-index: 100; opacity: 0; visibility: hidden; transition: 0.2s; }
+        .log-action-area:hover .ff-note-tooltip { opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0); }
+        .ff-tooltip-tag { font-size: 9px; font-weight: 800; color: #94a3b8; margin-bottom: 8px; letter-spacing: 0.5px; }
+        .ff-tooltip-arrow { position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%); border-left: 7px solid transparent; border-right: 7px solid transparent; border-top: 7px solid #1e293b; }
+        
+        /* Grid de cambios dentro del tooltip */
+        .ff-history-changes-grid { display: flex; flex-direction: column; gap: 8px; }
+        .ff-history-row { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px; }
+        .ff-history-label { font-size: 9px; color: #94a3b8; font-weight: 800; text-transform: uppercase; }
+        .ff-history-vals { display: flex; align-items: center; gap: 8px; font-family: monospace; }
+        .ff-history-old { color: #f87171; font-size: 10px; text-decoration: line-through; }
+        .ff-history-new { color: #4ade80; font-size: 11px; font-weight: 700; }
       `}</style>
     </AdminLayout>
   ); 
