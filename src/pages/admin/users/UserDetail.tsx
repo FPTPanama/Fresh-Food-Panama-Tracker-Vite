@@ -5,7 +5,7 @@ import { AdminLayout, notify } from '@/components/AdminLayout';
 import { 
   Building2, Mail, Phone, Pencil, Loader2, Plus, 
   ExternalLink, User, Save, Globe, Bell, ShoppingBag, 
-  CreditCard, Truck, ChevronDown, Calculator
+  CreditCard, Truck, ChevronDown, Calculator, Shield, AlertTriangle
 } from 'lucide-react';
 
 export default function ClientDetailPage() {
@@ -15,6 +15,12 @@ export default function ClientDetailPage() {
   const [client, setClient] = useState<any>(null);
   const [shipments, setShipments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // --- ESTADOS PARA ROLES Y SEGURIDAD ---
+  const [userProfile, setUserProfile] = useState<any>(null);
+  const [selectedRole, setSelectedRole] = useState("");
+  const [isUpdatingRole, setIsUpdatingRole] = useState(false);
+
   const [isEditingMaster, setIsEditingMaster] = useState(false);
   const [editData, setEditData] = useState<any>({});
   const [isEditingAddresses, setIsEditingAddresses] = useState(false);
@@ -27,16 +33,27 @@ export default function ClientDetailPage() {
     'DELIVERED': { label: 'Entregado', class: 'delivered' }
   };
 
-  // 1. CARGA DE DATOS (Adaptado para React Router)
+  // 1. CARGA DE DATOS COMPLETA
   const fetchData = useCallback(async (clientId: string) => {
     try {
+      // Cargar Cliente
       const { data: clientData, error: cErr } = await supabase
         .from('clients').select('*').eq('id', clientId).maybeSingle();
       if (cErr) throw cErr;
 
+      // Cargar Embarques
       const { data: shipsRes, error: sErr } = await supabase
         .from('shipments').select('*').eq('client_id', clientId).order('created_at', { ascending: false });
       if (sErr) throw sErr;
+
+      // Cargar Perfil de Acceso (Vínculo por client_id)
+      const { data: profileData } = await supabase
+        .from('profiles').select('*').eq('client_id', clientId).maybeSingle();
+      
+      if (profileData) {
+        setUserProfile(profileData);
+        setSelectedRole(profileData.role || 'client');
+      }
 
       const safeClient = { 
         ...clientData, 
@@ -64,7 +81,27 @@ export default function ClientDetailPage() {
     if (id) fetchData(id);
   }, [id, fetchData]);
 
-  // 2. FUNCIONES DE GUARDADO
+  // 2. FUNCIONES DE ACTUALIZACIÓN DE ACCESO
+  const handleUpdateRole = async () => {
+    if (!userProfile) return;
+    setIsUpdatingRole(true);
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ role: selectedRole.toLowerCase() })
+        .eq('id', userProfile.id);
+
+      if (error) throw error;
+      notify("Rol de acceso actualizado correctamente", "success");
+      setUserProfile({ ...userProfile, role: selectedRole });
+    } catch (e: any) {
+      notify("Error al actualizar permisos", "error");
+    } finally {
+      setIsUpdatingRole(false);
+    }
+  };
+
+  // 3. FUNCIONES DE GUARDADO OPERATIVO
   const saveMasterData = async () => {
     try {
       const payload = {
@@ -106,39 +143,35 @@ export default function ClientDetailPage() {
   };
 
   const uploadLogo = async (e: React.ChangeEvent<HTMLInputElement>) => {
-  try {
-    if (!e.target.files || e.target.files.length === 0) return;
-    setLoading(true);
-    
-    const file = e.target.files[0];
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${id}-${Math.random()}.${fileExt}`;
-    const filePath = fileName;
+    try {
+      if (!e.target.files || e.target.files.length === 0) return;
+      setLoading(true);
+      const file = e.target.files[0];
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${id}-${Math.random()}.${fileExt}`;
+      const filePath = fileName;
 
-    // 1. Subir a Supabase Storage
-    const { error: uploadError } = await supabase.storage
-      .from('client-logos')
-      .upload(filePath, file);
+      const { error: uploadError } = await supabase.storage
+        .from('client-logos')
+        .upload(filePath, file);
 
-    if (uploadError) throw uploadError;
+      if (uploadError) throw uploadError;
 
-    // 2. Actualizar la URL en la tabla de clientes
-    const { error: updateError } = await supabase
-      .from('clients')
-      .update({ logo_url: filePath })
-      .eq('id', id);
+      const { error: updateError } = await supabase
+        .from('clients')
+        .update({ logo_url: filePath })
+        .eq('id', id);
 
-    if (updateError) throw updateError;
+      if (updateError) throw updateError;
 
-    // 3. Actualizar estado local
-    setClient({ ...client, logo_url: filePath });
-    notify("Logo actualizado correctamente", "success");
-  } catch (error: any) {
-    notify("Error al subir logo: " + error.message, "error");
-  } finally {
-    setLoading(false);
-  }
-};
+      setClient({ ...client, logo_url: filePath });
+      notify("Logo actualizado correctamente", "success");
+    } catch (error: any) {
+      notify("Error al subir logo: " + error.message, "error");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const saveStakeholders = async () => {
     try {
@@ -161,28 +194,16 @@ export default function ClientDetailPage() {
           <div className="ff-header-top-row">
             <div className="ff-client-profile">
               <div className="ff-logo-wrapper">
-  {client.logo_url ? (
-    <img 
-      src={`https://oqgkbduqztrpfhfclker.supabase.co/storage/v1/object/public/client-logos/${client.logo_url}`} 
-      alt="Logo" 
-      className="ff-logo-img" 
-    />
-  ) : (
-    <div className="ff-logo-placeholder">{client.name?.charAt(0)}</div>
-  )}
-  
-  {/* Overlay estilizado sin texto de sistema */}
-  <label htmlFor="logo-upload" className="ff-edit-overlay">
-    <Plus size={20} strokeWidth={3} />
-    <input 
-      id="logo-upload"
-      type="file" 
-      accept="image/*" 
-      onChange={uploadLogo} 
-      style={{ display: 'none' }} /* Forzamos desaparición de texto */
-    />
-  </label>
-</div>
+                {client.logo_url ? (
+                  <img src={`https://oqgkbduqztrpfhfclker.supabase.co/storage/v1/object/public/client-logos/${client.logo_url}`} alt="Logo" className="ff-logo-img" />
+                ) : (
+                  <div className="ff-logo-placeholder">{client.name?.charAt(0)}</div>
+                )}
+                <label htmlFor="logo-upload" className="ff-edit-overlay">
+                  <Plus size={20} strokeWidth={3} />
+                  <input id="logo-upload" type="file" accept="image/*" onChange={uploadLogo} style={{ display: 'none' }} />
+                </label>
+              </div>
               <div className="ff-client-info">
                 <div className="ff-name-row">
                   <h1 className="ff-client-name-display">{client.name}</h1>
@@ -209,8 +230,47 @@ export default function ClientDetailPage() {
           </div>
         </header>
 
+        {/* SECCIÓN MODO DIOS: CONTROL DE ACCESO */}
+        <section className="pro-card access-control-dark">
+          <div className="access-inner">
+            <div className="access-meta">
+              <div className="access-icon-box"><Shield size={20} /></div>
+              <div>
+                <h3 className="access-title">Control de Identidad y Autoridad</h3>
+                {userProfile ? (
+                  <p className="access-desc">Vinculado a: <strong>{userProfile.email}</strong></p>
+                ) : (
+                  <p className="access-desc warning">Sin usuario de plataforma vinculado.</p>
+                )}
+              </div>
+            </div>
+            
+            {userProfile && (
+              <div className="access-logic">
+                <div className="field-select">
+                  <label>Nivel de Acceso</label>
+                  <select value={selectedRole} onChange={(e) => setSelectedRole(e.target.value)}>
+                    <option value="client">Cliente Portal</option>
+                    <option value="admin">Administrador</option>
+                    <option value="superadmin">Super Admin</option>
+                  </select>
+                </div>
+                <button 
+                  className="btn-update-role" 
+                  onClick={handleUpdateRole}
+                  disabled={isUpdatingRole || selectedRole === userProfile.role}
+                >
+                  {isUpdatingRole ? <Loader2 className="animate-spin" size={14}/> : <Save size={14}/>}
+                  Sincronizar Rol
+                </button>
+              </div>
+            )}
+          </div>
+        </section>
+
         <div className="main-grid">
           <div className="main-col">
+            {/* DATOS MAESTROS */}
             <section className="pro-card">
               <div className="card-header-v2">
                 <div className="header-title-group">
@@ -280,6 +340,7 @@ export default function ClientDetailPage() {
               </div>
             </section>
 
+            {/* MONITOR DE EMBARQUES */}
             <section className="pro-card">
               <div className="card-header-v2">
                 <div className="ff-header-text-group">
@@ -395,9 +456,11 @@ export default function ClientDetailPage() {
         .ff-header-minimal { padding: 10px 0 32px 0; background: transparent; }
         .ff-header-top-row { display: flex; justify-content: space-between; align-items: center; }
         .ff-client-profile { display: flex; align-items: center; gap: 20px; }
-        .ff-logo-wrapper { width: 64px; height: 64px; background: white; border-radius: 14px; border: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-        .ff-logo-img { width: 100%; height: 100%; object-fit: contain; padding: 8px; }
+        .ff-logo-wrapper { width: 64px; height: 64px; background: white; border-radius: 14px; border: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; transition: all 0.3s ease; }
+        .ff-logo-img { width: 100%; height: 100%; object-fit: contain; padding: 8px; background: white; }
         .ff-logo-placeholder { font-size: 24px; font-weight: 800; color: #cbd5e1; }
+        .ff-edit-overlay { position: absolute; inset: 0; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; color: white; opacity: 0; transition: opacity 0.2s; cursor: pointer; }
+        .ff-logo-wrapper:hover .ff-edit-overlay { opacity: 1; }
         .ff-name-row { display: flex; align-items: center; gap: 12px; }
         .ff-client-name-display { font-size: 26px; font-weight: 900; color: #0f172a; margin: 0; letter-spacing: -0.03em; }
         .ff-badge-status-inline { background: rgba(34, 197, 94, 0.1); color: #166534; padding: 3px 10px; border-radius: 6px; font-size: 11px; font-weight: 800; border: 1px solid rgba(34, 197, 94, 0.2); }
@@ -409,6 +472,24 @@ export default function ClientDetailPage() {
         .ff-btn-mini { display: flex; align-items: center; gap: 8px; padding: 9px 16px; border-radius: 10px; font-size: 13px; font-weight: 700; cursor: pointer; transition: 0.2s; border: 1px solid transparent; }
         .ff-btn-glass-secondary { background: white; color: #475569; border-color: #e2e8f0; }
         .ff-btn-glass-primary { background: rgba(15, 23, 42, 0.05); color: #0f172a; border-color: rgba(15, 23, 42, 0.1); }
+        
+        /* ACCESS CONTROL SECTION */
+        .access-control-dark { background: #0f172a; color: white; border: none; margin-bottom: 24px; padding: 24px; }
+        .access-inner { display: flex; justify-content: space-between; align-items: center; }
+        .access-meta { display: flex; align-items: center; gap: 16px; }
+        .access-icon-box { width: 44px; height: 44px; background: rgba(16, 185, 129, 0.15); color: #10b981; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
+        .access-title { font-size: 16px; font-weight: 800; margin: 0; }
+        .access-desc { font-size: 12px; color: #94a3b8; margin: 4px 0 0 0; }
+        .access-desc.warning { color: #f59e0b; font-weight: 700; }
+        .access-logic { display: flex; align-items: flex-end; gap: 16px; }
+        .field-select { display: flex; flex-direction: column; gap: 6px; }
+        .field-select label { font-size: 10px; font-weight: 800; text-transform: uppercase; color: #64748b; }
+        .field-select select { background: #1e293b; border: 1px solid #334155; color: white; padding: 10px; border-radius: 10px; font-size: 13px; font-weight: 700; outline: none; }
+        .btn-update-role { background: #10b981; color: white; border: none; padding: 12px 20px; border-radius: 10px; font-weight: 800; font-size: 12px; display: flex; align-items: center; gap: 8px; cursor: pointer; transition: 0.2s; }
+        .btn-update-role:hover:not(:disabled) { background: #059669; }
+        .btn-update-role:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* GRID AND CARDS */
         .main-grid { display: grid; grid-template-columns: 1fr 340px; gap: 24px; }
         .pro-card { background: white; border-radius: 20px; border: 1px solid #e2e8f0; margin-bottom: 24px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.02); }
         .card-header-v2 { padding: 20px 24px; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; }
@@ -424,7 +505,6 @@ export default function ClientDetailPage() {
         .ff-btn-save { background: #16a34a; color: white; border: none; padding: 7px 14px; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer; }
         .ff-btn-cancel { background: white; border: 1px solid #e2e8f0; color: #64748b; padding: 7px 14px; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer; }
         .ff-summary-clean { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: #fafafa; cursor: pointer; list-style: none; }
-        .ff-summary-clean::-webkit-details-marker { display: none; }
         .sum-left { display: flex; align-items: center; gap: 10px; font-weight: 700; color: #475569; font-size: 13px; }
         .chevron-icon { transition: 0.2s; color: #94a3b8; }
         .side-header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
@@ -456,36 +536,6 @@ export default function ClientDetailPage() {
         .col-span-full { grid-column: 1 / -1; }
         .ff-address-textarea { min-height: 80px; resize: vertical; line-height: 1.5; padding: 12px !important; font-family: inherit; }
         .ff-address-display { background: #f8fafc; padding: 10px 14px; border-radius: 8px; border-left: 4px solid #16a34a; color: #334155; white-space: pre-wrap; font-size: 13px; }
-        .ff-logo-wrapper { 
-  position: relative; 
-  transition: all 0.3s ease; 
-}
-
-.ff-edit-overlay {
-  position: absolute;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.6);
-  backdrop-filter: blur(4px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  opacity: 0;
-  transition: opacity 0.2s;
-  cursor: pointer;
-}
-
-.ff-logo-wrapper:hover .ff-edit-overlay {
-  opacity: 1;
-}
-
-.ff-logo-img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  padding: 8px;
-  background: white;
-}
       `}</style>
     </AdminLayout>
   );
