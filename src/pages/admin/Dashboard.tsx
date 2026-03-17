@@ -35,8 +35,12 @@ export default function Dashboard() {
 
   const getStepIndex = (status: string) => {
     const s = status?.toUpperCase() || '';
-    const idx = STEPS.findIndex(step => s.includes(step.type));
-    return idx !== -1 ? idx : 0; 
+    if (s.includes('DESTINATION') || s.includes('DESTINO')) return 5;
+    if (s.includes('TRANSIT') || s.includes('VUELO') || s.includes('IN_TRANSIT')) return 4;
+    if (s.includes('ORIGIN') || s.includes('TERMINAL') || s.includes('AT_ORIGIN')) return 3;
+    if (s.includes('DOCS') || s.includes('DOCS_READY')) return 2;
+    if (s.includes('PACKED') || s.includes('EMPAQUE')) return 1;
+    return 0; 
   };
 
   const fetchDashboardData = useCallback(async (isSilent = false) => {
@@ -101,7 +105,6 @@ export default function Dashboard() {
     <AdminLayout title="Overview" subtitle="Monitor de Operaciones Globales">
       <div className="ff-pro-dashboard">
         
-        {/* ALERT STRIP */}
         {data.stats.newRequests > 0 && (
           <div className="ff-alert-strip animate-slide-down">
             <div className="alert-content">
@@ -114,7 +117,7 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* HERO ROW: Pipeline & Growth */}
+        {/* HERO ROW - IGUALDAD DE ALTURA (STRETCH) */}
         <div className="ff-hero-row">
           <div className="ff-pipeline-section">
             <div className="stat-pro-card main">
@@ -122,7 +125,7 @@ export default function Dashboard() {
               <div className="stat-data">
                 <span className="label">Pipeline Comercial</span>
                 <span className="value">{formatCurrency(data.stats.pipeline)}</span>
-                <div className="growth"><TrendingUp size={14} /> +12.5% rendimiento proyectado</div>
+                <div className="growth"><TrendingUp size={14} /> +12.5% proyectado</div>
               </div>
               <div className="mini-stats-inline">
                  <div className="mini-item">
@@ -140,7 +143,7 @@ export default function Dashboard() {
           <div className="ff-growth-panel-strong">
              <div className="growth-header">
                 <Sparkles size={16} />
-                <span>Acciones Rápidas</span>
+                <span>Panel de Crecimiento</span>
              </div>
              <div className="growth-actions">
                <button className="btn-action-strong" onClick={() => setShowClientModal(true)}>
@@ -149,53 +152,43 @@ export default function Dashboard() {
                </button>
                <button className="btn-action-strong" onClick={() => setShowQuoteModal(true)}>
                  <div className="icon-circle"><FileText size={18} /></div>
-                 <span>Cotización</span>
+                 <span>Nueva Cotización</span>
                </button>
              </div>
           </div>
         </div>
 
-        {/* GRID 50/50: Cotizaciones y Seguimiento */}
         <div className="ff-dual-grid">
           
-          {/* COLUMNA 1: COTIZACIONES (DISEÑO REFORZADO) */}
+          {/* COLUMNA 1: COTIZACIONES (Estética Recuperada) */}
           <section className="ff-panel">
             <div className="panel-header">
               <div className="title-box"><Clock size={18} /><h3>Últimas Cotizaciones</h3></div>
               <button className="btn-ghost" onClick={() => navigate('/admin/quotes')}>Ver todas</button>
             </div>
             <div className="items-list">
-  {data.recentQuotes.map(q => {
-    // BLINDAJE DEL NOMBRE DEL CLIENTE
-    // 1. Intenta desde el Join (Relación DB)
-    // 2. Si es null, intenta desde el Snapshot (Datos guardados en el JSON de la cotización)
-    // 3. Si todo falla, pone "Cliente No Identificado"
-    const clientName = q.clients?.name || q.client_snapshot?.name || 'Cliente No Identificado';
-
-    return (
-      <div 
-        key={q.id} 
-        className={`quote-item-wide ${q.status === 'Solicitud' ? 'urgent' : ''}`} 
-        onClick={() => navigate(`/admin/quotes/${q.id}`)}
-      >
-        <div className="q-main">
-          <span className="q-client">{clientName}</span>
-          <span className="q-code">{q.quote_number || q.quote_no || 'Borrador'}</span>
-        </div>
-        <div className="q-status-box">
-          <span className="q-price">{formatCurrency(q.total)}</span>
-          <span className={`badge-status ${q.status?.toLowerCase().replace(/\s/g, '-')}`}>
-            {q.status}
-          </span>
-        </div>
-        <div className="q-arrow-box"><ChevronRight size={18} /></div>
-      </div>
-    );
-  })}
-</div>
+              {data.recentQuotes.map(q => {
+                const clientName = q.clients?.name || q.client_snapshot?.name || 'Cliente No Identificado';
+                return (
+                  <div key={q.id} className={`quote-item-wide ${q.status === 'Solicitud' ? 'urgent' : ''}`} onClick={() => navigate(`/admin/quotes/${q.id}`)}>
+                    <div className="q-main">
+                      <span className="q-client">{clientName}</span>
+                      <span className="q-code">{q.quote_number || 'Borrador'}</span>
+                    </div>
+                    <div className="q-status-box">
+                      <span className="q-price">{formatCurrency(q.total)}</span>
+                      <span className={`badge-status ${q.status?.toLowerCase().replace(/\s/g, '-')}`}>
+                        {q.status}
+                      </span>
+                    </div>
+                    <div className="q-arrow-box"><ChevronRight size={18} /></div>
+                  </div>
+                );
+              })}
+            </div>
           </section>
 
-          {/* COLUMNA 2: SEGUIMIENTO (DISEÑO DE ALTA FUERZA) */}
+          {/* COLUMNA 2: SEGUIMIENTO (Espaciado Refinado) */}
           <section className="ff-panel">
             <div className="panel-header">
               <div className="title-box"><Ship size={18} /><h3>Seguimiento Activo</h3></div>
@@ -204,14 +197,16 @@ export default function Dashboard() {
             <div className="items-list">
               {data.recentShipments.map(s => {
                 const currentIdx = getStepIndex(s.status);
+                const isAir = s.product_mode?.toLowerCase().includes('aére') || s.product_mode?.toLowerCase().includes('air');
+
                 return (
                   <div key={s.id} className="ship-stepper-card" onClick={() => navigate(`/admin/shipments/${s.id}`)}>
                     <div className="ship-info-row">
                       <div className="ship-badge-main">
-                        {s.product_mode === 'Aereo' ? <Plane size={14}/> : <Ship size={14}/>}
+                        {isAir ? <Plane size={14}/> : <Ship size={14}/>}
                         <span>{s.code}</span>
                       </div>
-                      <span className="ship-client-name">{s.clients?.name}</span>
+                      <span className="ship-client-name">{s.clients?.name || 'Cliente'}</span>
                     </div>
 
                     <div className="stepper-ui-pro">
@@ -243,15 +238,14 @@ export default function Dashboard() {
 
         <style>{`
           .ff-pro-dashboard { display: flex; flex-direction: column; gap: 24px; padding: 10px 0; }
-          
-          /* ALERTS */
           .ff-alert-strip { background: #fff1f2; border: 1px solid #fda4af; padding: 14px 24px; border-radius: 20px; display: flex; justify-content: space-between; align-items: center; color: #9f1239; box-shadow: 0 4px 15px rgba(159, 18, 57, 0.1); }
           .btn-alert-action { background: #9f1239; color: white; border: none; padding: 8px 16px; border-radius: 12px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: 0.2s; }
-          .btn-alert-action:hover { background: #be123c; transform: translateY(-1px); }
 
-          /* HERO 3.2fr 0.8fr */
-          .ff-hero-row { display: grid; grid-template-columns: 3.2fr 0.8fr; gap: 24px; }
-          .stat-pro-card.main { background: #0f172a; color: white; border-radius: 30px; padding: 35px; display: flex; align-items: center; gap: 40px; box-shadow: 0 20px 40px -15px rgba(15, 23, 42, 0.4); }
+          /* HERO GRID - ALINEACIÓN DE ALTURA POR DEFECTO */
+          .ff-hero-row { display: grid; grid-template-columns: 3fr 1fr; gap: 24px; align-items: stretch; }
+          .stat-pro-card.main { height: 100%; background: #0f172a; color: white; border-radius: 30px; padding: 35px; display: flex; align-items: center; gap: 40px; box-shadow: 0 20px 40px -15px rgba(15, 23, 42, 0.4); }
+          .ff-growth-panel-strong { height: 100%; background: linear-gradient(135deg, #059669 0%, #10b981 100%); border-radius: 30px; padding: 25px; display: flex; flex-direction: column; justify-content: center; box-shadow: 0 20px 40px -15px rgba(16, 185, 129, 0.4); }
+
           .stat-icon { background: rgba(255,255,255,0.08); width: 64px; height: 64px; border-radius: 20px; display: flex; align-items: center; justify-content: center; color: #10b981; border: 1px solid rgba(255,255,255,0.1); }
           .stat-pro-card .label { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 800; }
           .stat-pro-card .value { font-size: 42px; font-weight: 800; display: block; letter-spacing: -2px; margin: 5px 0; }
@@ -259,8 +253,6 @@ export default function Dashboard() {
           .m-label { font-size: 10px; color: #64748b; text-transform: uppercase; font-weight: 800; }
           .m-value { font-size: 24px; font-weight: 700; color: white; }
 
-          /* GROWTH PANEL */
-          .ff-growth-panel-strong { background: linear-gradient(135deg, #059669 0%, #10b981 100%); border-radius: 30px; padding: 25px; display: flex; flex-direction: column; justify-content: center; box-shadow: 0 20px 40px -15px rgba(16, 185, 129, 0.4); }
           .growth-header { display: flex; align-items: center; gap: 8px; color: white; font-size: 11px; font-weight: 800; text-transform: uppercase; margin-bottom: 20px; }
           .btn-action-strong { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px; background: rgba(255, 255, 255, 0.15); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 18px; color: white; font-weight: 700; cursor: pointer; margin-bottom: 10px; transition: 0.3s; }
           .btn-action-strong:hover { background: white; color: #059669; transform: translateY(-3px); }
@@ -272,35 +264,34 @@ export default function Dashboard() {
           .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; }
           .title-box h3 { font-size: 18px; font-weight: 800; color: #0f172a; margin: 0; }
 
-          /* COTIZACIONES - REINFORCED */
+          /* COTIZACIONES - ESTÉTICA REFORZADA */
           .quote-item-wide { display: flex; align-items: center; padding: 20px; border-radius: 22px; border: 1px solid #f1f5f9; margin-bottom: 15px; cursor: pointer; transition: 0.3s ease; position: relative; }
           .quote-item-wide:hover { transform: translateX(8px); background: #f8fafc; border-color: #e2e8f0; box-shadow: 0 10px 20px rgba(0,0,0,0.03); }
           .quote-item-wide.urgent { background: #fff1f2; border-color: #fecdd3; }
           .q-main { flex: 1; }
-          .q-client { display: block; font-weight: 800; font-size: 16px; color: #0f172a; margin-bottom: 4px; }
-          .q-code { font-size: 12px; font-family: 'JetBrains Mono', monospace; color: #94a3b8; }
+          .q-client { display: block; font-weight: 600; font-size: 14px; color: #1e293b; margin-bottom: 4px; }
+          .q-code { font-size: 11px; font-family: 'JetBrains Mono', monospace; color: #94a3b8; }
           .q-status-box { text-align: right; margin-right: 20px; }
           .q-price { display: block; font-weight: 800; font-size: 18px; color: #0f172a; }
           .badge-status { font-size: 10px; font-weight: 800; padding: 4px 10px; border-radius: 8px; text-transform: uppercase; background: #f1f5f9; color: #64748b; }
           .badge-status.sent { background: #dcfce7; color: #15803d; }
           .badge-status.solicitud { background: #9f1239; color: white; }
-          .q-arrow-box { color: #cbd5e1; transition: 0.2s; }
-          .quote-item-wide:hover .q-arrow-box { color: #0f172a; }
+          .q-arrow-box { color: #cbd5e1; }
 
-          /* STEPPERS - HIGH POWER */
+          /* SEGUIMIENTO ACTIVO - ESPACIADO MEJORADO */
           .ship-stepper-card { padding: 24px; border-radius: 25px; border: 1px solid #f1f5f9; margin-bottom: 15px; cursor: pointer; transition: 0.3s; }
-          .ship-stepper-card:hover { border-color: #10b981; background: #f0fdf4; box-shadow: 0 10px 25px rgba(16, 185, 129, 0.08); }
-          .ship-badge-main { display: flex; align-items: center; gap: 8px; background: #0f172a; color: white; padding: 5px 14px; border-radius: 10px; font-weight: 800; font-size: 11px; }
-          .ship-client-name { font-weight: 700; color: #64748b; font-size: 14px; }
+          .ship-stepper-card:hover { border-color: #10b981; background: #f0fdf4; }
+          .ship-info-row { display: flex; align-items: center; gap: 18px; margin-bottom: 22px; }
+          .ship-badge-main { display: flex; align-items: center; gap: 8px; background: rgba(15, 23, 42, 0.12); color: #0f172a; padding: 5px 14px; border-radius: 10px; font-weight: 800; font-size: 11px; flex-shrink: 0; }
+          .ship-client-name { font-weight: 600; color: #64748b; font-size: 13px; }
 
+          /* STEPPER UI */
           .stepper-ui-pro { display: flex; align-items: center; justify-content: space-between; padding: 0 10px; margin-top: 10px; }
           .step-node { width: 22px; height: 22px; border-radius: 50%; border: 3px solid #e2e8f0; background: white; display: flex; align-items: center; justify-content: center; z-index: 2; transition: 0.4s; }
           .step-node.filled { background: #166534; border-color: #166534; color: white; }
           .step-node.active { transform: scale(1.3); border-color: #10b981; box-shadow: 0 0 15px rgba(16, 185, 129, 0.4); }
-          .step-node .inner-dot { width: 6px; height: 6px; background: #cbd5e1; border-radius: 50%; }
           .step-bar { flex: 1; height: 4px; background: #e2e8f0; margin: 0 -2px; z-index: 1; border-radius: 2px; }
           .step-bar.filled { background: #166534; }
-          
           .stepper-labels-pro { display: flex; justify-content: space-between; margin-top: 12px; }
           .stepper-labels-pro span { font-size: 9px; font-weight: 800; color: #94a3b8; text-transform: uppercase; text-align: center; width: 55px; line-height: 1.2; letter-spacing: 0.2px; }
           .stepper-labels-pro span.active { color: #166534; }
