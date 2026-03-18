@@ -8,6 +8,9 @@ import {
   CreditCard, Truck, ChevronDown, Calculator, Shield, AlertTriangle
 } from 'lucide-react';
 
+// IMPORTACIÓN DEL MODAL
+import { QuickQuoteModal } from '../../../components/quotes/QuickQuoteModal';
+
 export default function ClientDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -25,6 +28,9 @@ export default function ClientDetailPage() {
   const [editData, setEditData] = useState<any>({});
   const [isEditingAddresses, setIsEditingAddresses] = useState(false);
   const [isEditingStakeholders, setIsEditingStakeholders] = useState(false);
+
+  // ESTADO PARA EL MODAL DE COTIZACIÓN
+  const [isQuoteModalOpen, setIsQuoteModalOpen] = useState(false);
 
   const statusConfig: any = {
     'CREATED': { label: 'Creado', class: 'created' },
@@ -220,7 +226,8 @@ export default function ClientDetailPage() {
               </div>
             </div>
             <div className="ff-header-actions-minimal">
-              <button className="ff-btn-mini ff-btn-glass-secondary" onClick={() => navigate(`/admin/quotes/new?clientId=${id}`)}>
+              {/* BOTÓN ACTUALIZADO PARA ABRIR EL MODAL */}
+              <button className="ff-btn-mini ff-btn-glass-secondary" onClick={() => setIsQuoteModalOpen(true)}>
                 <Calculator size={14} /> <span>Nueva Cotización</span>
               </button>
               <button className="ff-btn-mini ff-btn-glass-primary" onClick={() => navigate(`/admin/shipments/new?clientId=${id}`)}>
@@ -450,6 +457,13 @@ export default function ClientDetailPage() {
           </aside>
         </div>
       </div>
+
+      {/* RENDER DEL MODAL DE COTIZACIÓN RÁPIDA */}
+      <QuickQuoteModal 
+        isOpen={isQuoteModalOpen} 
+        onClose={() => setIsQuoteModalOpen(false)}
+        initialClientId={id}
+      />
 
       <style>{`
         .view-container { padding: 20px 40px; max-width: 1600px; margin: 0 auto; background: #f8fafc; min-height: 100vh; font-family: 'Inter', sans-serif; }

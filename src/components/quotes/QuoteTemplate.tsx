@@ -1,7 +1,5 @@
 import React from 'react';
 
-// En Vite, las imágenes se importan como assets o se usan desde /public
-// Asumiremos que el logo está en public/brand/freshfood_logo.png
 const LOGO_URL = "/brand/freshfood_logo.png";
 
 export const QuoteTemplate = ({ data }: { data: any }) => {
@@ -18,11 +16,9 @@ export const QuoteTemplate = ({ data }: { data: any }) => {
   return (
     <div className="ff-pdf-body">
       <div className="invoice-card">
-        
         <header className="main-header">
           <div className="brand-section">
             <div className="logo-container">
-              {/* Cambiado: Usamos img estándar para Vite */}
               <img src={LOGO_URL} alt="Fresh Food Panama" className="company-logo" />
             </div>
             <div className="brand-details">
@@ -45,7 +41,6 @@ export const QuoteTemplate = ({ data }: { data: any }) => {
             <p className="client-name">{data.client_snapshot?.name || 'Client Name'}</p>
             <p className="detail"><strong>TAX ID:</strong> {data.client_snapshot?.tax_id || 'N/A'}</p>
             <p className="detail"><strong>ADDRESS:</strong> {data.client_snapshot?.address || 'N/A'}</p>
-            <p className="detail"><strong>COUNTRY:</strong> {data.client_snapshot?.country || 'N/A'}</p>
           </div>
 
           <div className="info-column border-left">
@@ -53,17 +48,16 @@ export const QuoteTemplate = ({ data }: { data: any }) => {
             <div className="log-row"><span>INCOTERM:</span> <strong>{data.terms || 'CIP'}</strong></div>
             <div className="log-row"><span>DESTINATION:</span> <strong>{data.destination || 'N/A'}</strong></div>
             <div className="log-row"><span>MODE:</span> <strong>{data.mode?.toUpperCase() || 'AIR'}</strong></div>
-            <div className="log-row"><span>PAYMENT:</span> <strong>{data.payment_terms || 'Prepaid'}</strong></div>
           </div>
         </div>
 
         <div className="specs-container">
           <h3 className="section-label">PRODUCT SPECIFICATIONS</h3>
           <div className="specs-grid">
-            <div className="spec-box"><span className="label">PRODUCT</span><span className="val">{data.product_details?.name || 'Produce'}</span></div>
-            <div className="spec-box"><span className="label">VARIETY</span><span className="val">{clean(data.product_details?.variety)}</span></div>
-            <div className="spec-box"><span className="label">COLOR</span><span className="val">{data.product_details?.color || 'N/A'}</span></div>
-            <div className="spec-box"><span className="label">BRIX</span><span className="val">{data.product_details?.brix || 'N/A'}</span></div>
+            <div className="spec-box"><span className="label">PRODUCT</span><span className="val">{data.product_details?.product_name || 'Produce'}</span></div>
+            <div className="spec-box"><span className="label">VARIETY</span><span className="val">{clean(data.product_details?.variety_name)}</span></div>
+            <div className="spec-box"><span className="label">CALIBER</span><span className="val">{data.product_details?.caliber || 'N/A'}</span></div>
+            <div className="spec-box"><span className="label">COLOR / RIPENESS</span><span className="val">{data.product_details?.color || 'N/A'}</span></div>
           </div>
         </div>
 
@@ -78,7 +72,7 @@ export const QuoteTemplate = ({ data }: { data: any }) => {
             <tr>
               <td className="desc-cell">
                 <strong>Export Logistics & Fruit Supply Services</strong>
-                <p className="sub-desc">Comprehensive supply chain management including harvest, packing, and international transport handling.</p>
+                <p className="sub-desc">Comprehensive supply chain management including harvest, packing, and international transport.</p>
               </td>
               <td className="text-right val-cell">{fCurrency(data.total)}</td>
             </tr>
@@ -109,7 +103,6 @@ export const QuoteTemplate = ({ data }: { data: any }) => {
         </footer>
       </div>
 
-      {/* Cambiado: CSS estándar para Vite/React */}
       <style>{`
         .ff-pdf-body { background: #f1f5f9; padding: 40px 20px; display: flex; justify-content: center; }
         .invoice-card { background: white; width: 21.59cm; min-height: 27.94cm; padding: 1.5cm; font-family: 'Inter', system-ui, sans-serif; display: flex; flex-direction: column; box-shadow: 0 10px 25px rgba(0,0,0,0.1); color: #1e293b; position: relative; }
@@ -153,13 +146,6 @@ export const QuoteTemplate = ({ data }: { data: any }) => {
         .sig-line { width: 220px; border-top: 1px solid #cbd5e1; margin-bottom: 10px; }
         .signature p { margin: 2px 0; font-size: 12px; font-weight: 700; color: #1e293b; }
         .sig-company { color: #16a34a !important; font-size: 10px !important; text-transform: uppercase; }
-
-        @media print {
-          .ff-pdf-body { padding: 0; background: white; }
-          .invoice-card { box-shadow: none; width: 100%; height: 100%; padding: 0; }
-          .summary-footer { -webkit-print-color-adjust: exact; background-color: #1e293b !important; color-adjust: exact; }
-          .quote-badge { -webkit-print-color-adjust: exact; background-color: #16a34a !important; }
-        }
       `}</style>
     </div>
   );
