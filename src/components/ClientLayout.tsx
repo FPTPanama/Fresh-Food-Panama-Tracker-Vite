@@ -174,11 +174,58 @@ export function ClientLayout({ title, subtitle, children, wide = false }: Client
         }
         .ff-user__logout:hover { background: #fef2f2; }
 
-        /* SIDEBAR & MAIN STYLES (TU CÓDIGO) */
-        .ff-side { grid-area: side; background: white; border-right: 1px solid #eef2f6; padding: 20px 12px; position: relative; }
-        .ff-side__item { display: flex; align-items: center; gap: 12px; padding: 12px; color: #64748b; text-decoration: none; border-radius: 10px; margin-bottom: 4px; transition: 0.2s; position: relative; }
-        .ff-side__item:hover { background: #f0fdf4; color: #10b981; }
-        .ff-side__item.is-active { background: #ecfdf5; color: #059669; font-weight: 700; }
+  /* SIDEBAR CLONADO EXACTO DEL ADMIN LAYOUT */
+.ff-side { 
+  grid-area: side; 
+  background: #284b2c; /* EL VERDE OLIVA EXACTO DE TU IMAGEN */
+  border-right: 1px solid #1f3a22; 
+  padding: 24px 12px; 
+  position: relative; 
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* ITEMS DEL MENÚ (Estado Normal) */
+.ff-side__item { 
+  display: flex; 
+  align-items: center; 
+  gap: 16px; /* Más espacio como en la imagen */
+  padding: 12px 16px; 
+  color: #ffffff; /* Texto blanco puro */
+  text-decoration: none; 
+  border-radius: 12px; 
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease; 
+  position: relative; 
+}
+
+/* HOVER DELICADO (Efecto Ámbar/Dorado de tu Admin) */
+.ff-side__item:hover { 
+  background: #3a5a3e; /* Fondo ligeramente más claro */
+  color: #f59e0b; /* El sutil toque dorado en texto e icono */
+}
+
+/* ITEM SELECCIONADO / ACTIVO (Como 'Clientes' en tu imagen) */
+.ff-side__item.is-active { 
+  background: #415f45; /* Fondo resaltado de la imagen */
+  color: #ffffff; 
+  font-weight: 700; 
+}
+
+/* INDICADOR ACTIVO (La línea lateral ámbar) */
+.ff-active-indicator { 
+  position: absolute; 
+  left: 0; 
+  top: 10px; 
+  bottom: 10px; 
+  width: 4px; 
+  background: #f59e0b; /* Línea ámbar/dorada */
+  border-radius: 0 4px 4px 0; 
+}
+
+}
         .ff-active-indicator { position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; background: #10b981; border-radius: 0 4px 4px 0; }
         .ff-main { grid-area: main; overflow-y: auto; background: #f8fafc; }
         .ff-content { padding: 32px; max-width: 1200px; margin: 0 auto; width: 100%; }

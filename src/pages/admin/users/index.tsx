@@ -5,7 +5,7 @@ import { AdminLayout, notify } from '@/components/AdminLayout';
 import { 
   Plus, Calculator, KeyRound, Mail, Loader2, 
   ChevronRight, Search, X, Users, Globe, 
-  SortAsc, ShieldCheck, Building2, UserCheck
+  SortAsc, ShieldCheck, Building2, UserCheck, Trash2
 } from 'lucide-react';
 
 // MODALES
@@ -44,7 +44,6 @@ export default function ClientsIndex() {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    setDataList([]); 
     try {
       if (activeTab === 'clients') {
         const { data, error } = await supabase
@@ -56,7 +55,7 @@ export default function ClientsIndex() {
       } else {
         const { data, error } = await supabase
           .from('profiles')
-          .select('user_id, email, role')
+          .select('user_id, email, role, full_name, position')
           .in('role', ['admin', 'superadmin'])
           .order('email', { ascending: dir === 'asc' });
         if (error) throw error;
@@ -74,7 +73,12 @@ export default function ClientsIndex() {
   const filteredData = useMemo(() => {
     return dataList.filter(item => {
       const search = q.toLowerCase();
-      const textToSearch = (item?.name || item?.email || "").toLowerCase();
+      const textToSearch = (
+        item?.name || 
+        item?.full_name || 
+        item?.email || 
+        ""
+      ).toLowerCase();
       return textToSearch.includes(search);
     });
   }, [dataList, q]);
@@ -88,6 +92,34 @@ export default function ClientsIndex() {
       notify("Correo de seguridad enviado", "success");
     } catch (e: any) {
       notify(e.message, "error");
+    }
+  };
+
+  // FUNCIÓN DE ELIMINACIÓN UNIFICADA
+  const handleDelete = async (e: React.MouseEvent, item: any) => {
+    e.stopPropagation();
+    const isStaff = activeTab === 'staff';
+    const idToDelete = isStaff ? item.user_id : item.id;
+    const nameToDisplay = isStaff ? (item.full_name || item.email) : item.name;
+    const table = isStaff ? 'profiles' : 'clients';
+    const column = isStaff ? 'user_id' : 'id';
+
+    if (!idToDelete) return;
+
+    if (!window.confirm(`¿ESTÁS SEGURO? Se eliminará permanentemente a "${nameToDisplay}" de la base de datos. Esta acción no se puede deshacer.`)) return;
+
+    try {
+      const { error } = await supabase
+        .from(table)
+        .delete()
+        .eq(column, idToDelete);
+
+      if (error) throw error;
+
+      notify("Registro eliminado con éxito", "success");
+      setDataList(prev => prev.filter(i => (isStaff ? i.user_id : i.id) !== idToDelete));
+    } catch (err: any) {
+      notify("Error al eliminar: Verifica permisos de Superadmin", "error");
     }
   };
 
@@ -141,21 +173,20 @@ export default function ClientsIndex() {
               const isStaff = activeTab === 'staff';
               const email = isStaff ? item?.email : item?.contact_email;
               const name = isStaff 
-                ? (item?.email?.split('@')[0].toUpperCase() || 'ADMIN') 
+                ? (item?.full_name || item?.email?.split('@')[0].toUpperCase() || 'ADMIN') 
                 : (item?.name || 'S/N');
               
               const sub = isStaff 
-                ? `ACCESO: ${item?.role?.toUpperCase() || 'ADMIN'}` 
+                ? (item?.position || `ACCESO: ${item?.role?.toUpperCase() || 'ADMIN'}`) 
                 : (item?.tax_id || 'SIN TAX ID');
                 
               const rowId = isStaff ? item?.user_id : item?.id;
 
               return (
                 <div 
-                  key={rowId || Math.random()} 
+                  key={rowId || `item-${Math.random()}`} 
                   className="quote-row-item row-interactive" 
                   onClick={() => {
-                    // NAVEGACIÓN CONDICIONAL FIXED
                     if (isStaff) {
                       navigate(`/admin/staff/${rowId}`);
                     } else {
@@ -170,7 +201,7 @@ export default function ClientsIndex() {
                           <img src={`https://oqgkbduqztrpfhfclker.supabase.co/storage/v1/object/public/client-logos/${item.logo_url}`} alt="logo" />
                         ) : (
                           <div className={`avatar-initials-mini ${isStaff ? 'staff-bg' : ''}`}>
-                            {name.charAt(0).toUpperCase()}
+                            {(name || 'U').charAt(0).toUpperCase()}
                           </div>
                         )}
                       </div>
@@ -208,8 +239,16 @@ export default function ClientsIndex() {
                         <button className="btn-circle orange" onClick={(e) => { e.stopPropagation(); setSelectedClientId(item.id); setIsQuoteModalOpen(true); }}><Calculator size={14} /></button>
                       )}
                       <button className="btn-circle green" onClick={(e) => { e.stopPropagation(); handleResetPassword(email); }}><KeyRound size={14} /></button>
+                      
+                      {/* BOTÓN ELIMINAR (CLIENTE O STAFF) */}
+                      <button 
+                        className="btn-circle red-delete" 
+                        onClick={(e) => handleDelete(e, item)}
+                        title="Eliminar registro"
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
-                    <ChevronRight size={20} className="entry-chevron" />
                   </div>
                 </div>
               );
@@ -260,8 +299,7 @@ export default function ClientsIndex() {
         .actions-inline { display: flex; gap: 10px; margin-right: 15px; }
         .btn-circle { width: 36px; height: 36px; border-radius: 12px; border: 1px solid #f1f5f9; display: flex; align-items: center; justify-content: center; background: white; color: #94a3b8; transition: 0.2s; }
         .btn-circle:hover { transform: scale(1.1); color: #0f172a; }
-        .entry-chevron { color: #cbd5e1; transition: 0.2s; }
-        .quote-row-item:hover .entry-chevron { color: #0f172a; transform: translateX(3px); }
+        .btn-circle.red-delete:hover { background: #fef2f2; color: #ef4444; border-color: #fee2e2; }
         .col-status { display: flex; align-items: center; justify-content: flex-end; }
         .skeleton-row { pointer-events: none; border-color: #f1f5f9 !important; }
         .skel-avatar { width: 44px; height: 44px; background: #f1f5f9; border-radius: 12px; position: relative; overflow: hidden; }
