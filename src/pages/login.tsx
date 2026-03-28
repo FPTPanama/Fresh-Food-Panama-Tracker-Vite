@@ -31,28 +31,32 @@ export default function LoginPage() {
   const [emailSent, setEmailSent] = useState(false);
 
   async function routeByRole(): Promise<boolean> {
-    const { data } = await supabase.auth.getSession();
-    const token = data.session?.access_token;
-    if (!token) return false;
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (!token) return false;
 
-    const res = await fetch(`${getApiBase()}/.netlify/functions/whoami`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+      const res = await fetch(`${getApiBase()}/.netlify/functions/whoami`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
 
-    if (!res.ok) {
-      await supabase.auth.signOut();
+      if (!res.ok) {
+        await supabase.auth.signOut();
+        return false;
+      }
+
+      const me: { email: string; role: Role; client_id: string | null } = await res.json();
+      const role = String(me.role || "").toLowerCase();
+
+      if (role === "admin" || role === "superadmin") {
+        navigate("/admin/shipments");
+      } else {
+        navigate("/shipments");
+      }
+      return true;
+    } catch {
       return false;
     }
-
-    const me: { email: string; role: Role; client_id: string | null } = await res.json();
-    const role = String(me.role || "").toLowerCase();
-
-    if (role === "admin" || role === "superadmin") {
-      navigate("/admin/shipments");
-    } else {
-      navigate("/shipments");
-    }
-    return true;
   }
 
   useEffect(() => {
@@ -86,7 +90,9 @@ export default function LoginPage() {
     setLoading(false);
 
     if (!redirected) {
-      setError("Sesión creada, pero no se pudo determinar tu rol.");
+      setError(
+        "Sesión creada, pero no se pudo obtener tu rol. En local: añade en .env VITE_API_BASE_URL=https://tu-sitio.netlify.app (sin barra final) o ejecuta Netlify en el puerto 8888."
+      );
     }
   }
 
