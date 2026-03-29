@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { AdminLayout, notify } from '@/components/AdminLayout';
 import { 
   Plus, Calculator, KeyRound, Mail, Loader2, 
-  Search, X, Users, SortAsc, ShieldCheck, Building2, 
+  Search, Users, SortAsc, ShieldCheck, Building2, 
   UserCheck, Trash2, UserPlus 
 } from 'lucide-react';
 
@@ -44,6 +44,7 @@ export default function ClientsIndex() {
   const [q, setQ] = useState("");
   const [dir, setDir] = useState<"asc" | "desc">("asc");
 
+  // ESTADOS DE MODALES
   const [isQuoteModalOpen, setIsQuoteModalOpen] = useState(false);
   const [isNewClientModalOpen, setIsNewClientModalOpen] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
@@ -77,45 +78,40 @@ export default function ClientsIndex() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const handleInviteClient = async (e: React.MouseEvent, item: any) => {
-  e.stopPropagation();
-  if (!item.contact_email) return notify("El cliente no tiene un email válido", "error");
-  if (!window.confirm(`¿Enviar invitación oficial para ${item.name}?`)) return;
+    e.stopPropagation();
+    if (!item.contact_email) return notify("El cliente no tiene un email válido", "error");
+    if (!window.confirm(`¿Enviar invitación oficial para ${item.name}?`)) return;
 
-  setInvitingId(item.id);
-  try {
-    // 1. OBTENER LA SESIÓN ACTUAL PARA EL TOKEN
-    const { data: { session } } = await supabase.auth.getSession();
-    
-    if (!session) {
-      throw new Error("Tu sesión ha expirado. Por favor, vuelve a iniciar sesión.");
+    setInvitingId(item.id);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Tu sesión ha expirado.");
+
+      const response = await fetch('/.netlify/functions/inviteUser', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({
+          email: item.contact_email,
+          full_name: item.contact_name || item.name,
+          role: 'client',
+          client_id: item.id
+        })
+      });
+
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message || "Error al procesar invitación");
+
+      notify("Invitación enviada exitosamente", "success");
+      fetchData(); 
+    } catch (err: any) {
+      notify(err.message, "error");
+    } finally {
+      setInvitingId(null);
     }
-
-    const response = await fetch('/.netlify/functions/inviteUser', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        // 2. ENVIAR EL TOKEN EN LOS HEADERS
-        'Authorization': `Bearer ${session.access_token}`
-      },
-      body: JSON.stringify({
-        email: item.contact_email,
-        full_name: item.contact_name || item.name,
-        role: 'client',
-        client_id: item.id
-      })
-    });
-
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.message || "Error al procesar invitación");
-
-    notify("Invitación enviada exitosamente", "success");
-    fetchData(); 
-  } catch (err: any) {
-    notify(err.message, "error");
-  } finally {
-    setInvitingId(null);
-  }
-};
+  };
 
   const filteredData = useMemo(() => {
     return dataList.filter(item => {
@@ -172,7 +168,13 @@ export default function ClientsIndex() {
             </button>
           </div>
           {activeTab === 'clients' && (
-            <button className="btn-main-action" onClick={() => setIsNewClientModalOpen(true)}>
+            <button 
+                className="btn-main-action" 
+                onClick={(e) => {
+                    e.stopPropagation();
+                    setIsNewClientModalOpen(true);
+                }}
+            >
               <Plus size={20} /> Nuevo Cliente
             </button>
           )}
@@ -260,7 +262,6 @@ export default function ClientsIndex() {
 
                   <div className="col-status">
                     <div className="actions-inline">
-                      {/* BOTÓN DE INVITACIÓN: Solo si es cliente y no tiene acceso */}
                       {!isStaff && !item.has_platform_access && (
                         <button 
                           className="btn-circle blue-invite" 
@@ -276,7 +277,6 @@ export default function ClientsIndex() {
                         <button className="btn-circle orange" onClick={(e) => { e.stopPropagation(); setSelectedClientId(item.id); setIsQuoteModalOpen(true); }}><Calculator size={14} /></button>
                       )}
                       
-                      {/* Solo mostrar reset password si ya tiene acceso o es staff */}
                       {(isStaff || item.has_platform_access) && (
                         <button className="btn-circle green" onClick={(e) => { e.stopPropagation(); handleResetPassword(email); }}><KeyRound size={14} /></button>
                       )}
@@ -291,8 +291,19 @@ export default function ClientsIndex() {
         </div>
       </div>
 
+      {/* MODALES CON Z-INDEX REFORZADO POR CSS */}
       <QuickQuoteModal isOpen={isQuoteModalOpen} onClose={() => setIsQuoteModalOpen(false)} initialClientId={selectedClientId} />
-      <NewClientModal isOpen={isNewClientModalOpen} onClose={() => setIsNewClientModalOpen(false)} onSuccess={fetchData} />
+      
+      {isNewClientModalOpen && (
+        <NewClientModal 
+          isOpen={isNewClientModalOpen} 
+          onClose={() => setIsNewClientModalOpen(false)} 
+          onSuccess={() => {
+            setIsNewClientModalOpen(false);
+            fetchData();
+          }} 
+        />
+      )}
 
       <style>{`
         .quotes-page-wrapper { padding: 10px 0; max-width: 1400px; margin: 0 auto; }
@@ -300,7 +311,7 @@ export default function ClientsIndex() {
         .tabs-navigation-pro { display: flex; gap: 8px; background: #f1f5f9; padding: 6px; border-radius: 16px; width: fit-content; }
         .tabs-navigation-pro button { display: flex; align-items: center; gap: 8px; padding: 10px 20px; border: none; background: none; border-radius: 12px; font-size: 13px; font-weight: 700; color: #64748b; cursor: pointer; transition: 0.3s; }
         .tabs-navigation-pro button.active { background: white; color: #0f172a; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
-        .btn-main-action { background: #0f172a; color: white; border: none; padding: 12px 24px; border-radius: 14px; font-weight: 700; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: 0.3s; box-shadow: 0 10px 15px -3px rgba(15, 23, 42, 0.2); }
+        .btn-main-action { background: #0f172a; color: white; border: none; padding: 12px 24px; border-radius: 14px; font-weight: 700; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: 0.3s; box-shadow: 0 10px 15px -3px rgba(15, 23, 42, 0.2); position: relative; z-index: 5; }
         .stats-dashboard { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; margin-bottom: 30px; }
         .metric-card { background: white; padding: 20px; border-radius: 20px; border: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; }
         .metric-label { font-size: 10px; font-weight: 800; color: #94a3b8; text-transform: uppercase; }

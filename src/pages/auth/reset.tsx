@@ -13,14 +13,7 @@ function isStrongEnough(pw: string) {
   return okLen && hasLetter && hasNumber;
 }
 
-function parseHashParams() {
-  const h = typeof window !== "undefined" ? window.location.hash : "";
-  if (!h || !h.startsWith("#")) return new URLSearchParams();
-  return new URLSearchParams(h.slice(1));
-}
-
 export default function ResetPasswordPage() {
-  // Cambio: Usamos useNavigate de react-router-dom
   const navigate = useNavigate();
 
   const [view, setView] = useState<ViewState>("checking");
@@ -43,68 +36,83 @@ export default function ResetPasswordPage() {
 
   useEffect(() => {
     let alive = true;
+    // Bloqueo para evitar doble ejecución en StrictMode o re-renders
+    let isProcessing = false;
 
-    function toError(message: string) {
-      if (!alive) return;
-      setView("error");
-      setMsg(message);
-    }
+    const handleAuth = async () => {
+      if (isProcessing) return;
 
-    async function ensureRecoverySession() {
       try {
-        const { data: sub } = supabase.auth.onAuthStateChange((event) => {
-          if (!alive) return;
-          if (event === "PASSWORD_RECOVERY") {
+        // 1. Verificamos si ya existe una sesión (evita re-validar el hash si ya entró)
+        const { data: { session: existingSession } } = await supabase.auth.getSession();
+        if (existingSession && alive) {
+          setView("ready");
+          return;
+        }
+
+        // 2. Extraer parámetros de la URL
+        const params = new URLSearchParams(window.location.search);
+        const tokenHash = params.get('token_hash');
+        const type = params.get('type') as any;
+
+        // 3. Si hay un token_hash, lo validamos SOLO UNA VEZ
+        if (tokenHash && type) {
+          isProcessing = true;
+          console.log("Validando token_hash por única vez...");
+          
+          const { error: verifyError } = await supabase.auth.verifyOtp({
+            token_hash: tokenHash,
+            type: type,
+          });
+
+          if (verifyError) {
+            // Si el error es "invalid token" pero realmente ya tenemos sesión, ignoramos el error
+            const { data: { session: confirmedSession } } = await supabase.auth.getSession();
+            if (confirmedSession) {
+              if (alive) setView("ready");
+              return;
+            }
+
+            console.error("Error verifyOtp:", verifyError.message);
+            if (alive) {
+              setView("error");
+              setMsg("El enlace es inválido o ha expirado. Por favor solicita uno nuevo.");
+            }
+            return;
+          }
+
+          if (alive) setView("ready");
+          return;
+        }
+
+        // 4. Fallback: Escuchar eventos de Auth
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+          if (alive && (event === "PASSWORD_RECOVERY" || session)) {
             setView("ready");
           }
         });
 
-        const hp = parseHashParams();
-        const access_token = hp.get("access_token");
-        const refresh_token = hp.get("refresh_token");
-        const type = (hp.get("type") || "").toLowerCase();
-
-        if (access_token && refresh_token) {
-          const { error } = await supabase.auth.setSession({ access_token, refresh_token });
-          if (error) {
-            sub.subscription.unsubscribe();
-            toError("El enlace de restablecimiento no es válido o ya expiró.");
-            return;
+        // 5. Timeout de seguridad
+        const timer = setTimeout(() => {
+          if (alive && view === "checking") {
+            setView("error");
+            setMsg("No detectamos una sesión de recuperación válida.");
           }
+        }, 7000);
 
-          if (typeof window !== "undefined" && window.location.hash) {
-            window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
-          }
-        }
-
-        const started = Date.now();
-        const maxWaitMs = 1800;
-
-        while (alive && Date.now() - started < maxWaitMs) {
-          const { data } = await supabase.auth.getSession();
-          if (data.session?.access_token) {
-            if (!alive) break;
-            setView("ready");
-            sub.subscription.unsubscribe();
-            return;
-          }
-          await new Promise((r) => setTimeout(r, 200));
-        }
-
-        sub.subscription.unsubscribe();
-        if (type === "recovery" || type === "invite") {
-            setView("ready"); // Forzamos vista lista si detectamos el tipo correcto
-        } else {
-            toError("No detectamos un enlace de recuperación válido.");
-        }
-      } catch {
-        toError("No pudimos procesar el restablecimiento.");
+        return () => {
+          subscription.unsubscribe();
+          clearTimeout(timer);
+        };
+      } catch (err) {
+        console.error("Error en handleAuth:", err);
+        if (alive) setView("error");
       }
-    }
+    };
 
-    ensureRecoverySession();
+    handleAuth();
     return () => { alive = false; };
-  }, []);
+  }, []); // Dependencias vacías para ejecución única
 
   async function onSave() {
     if (!canSave || saving) return;
@@ -113,6 +121,7 @@ export default function ResetPasswordPage() {
 
     try {
       const { error } = await supabase.auth.updateUser({ password: pw1 });
+      
       if (error) {
         setMsg(error.message || "No se pudo actualizar la contraseña.");
         setSaving(false);
@@ -121,12 +130,13 @@ export default function ResetPasswordPage() {
 
       setView("done");
       setSaving(false);
+      
       await supabase.auth.signOut();
 
       setTimeout(() => {
-        navigate("/login"); // Cambio: navigation de react-router-dom
-      }, 2000);
-    } catch {
+        navigate("/login");
+      }, 3000);
+    } catch (err) {
       setMsg("Ocurrió un error inesperado.");
       setSaving(false);
     }
@@ -137,7 +147,6 @@ export default function ResetPasswordPage() {
       <div className="card">
         <div className="head">
           <div className="brand">
-             {/* Cambio: img estándar */}
             <img src="/brand/freshfood-logo.svg" alt="Fresh Food Panamá" className="logo" />
           </div>
           <div className="title">Restablecer contraseña</div>
@@ -165,8 +174,8 @@ export default function ResetPasswordPage() {
           </div>
         ) : view === "done" ? (
           <div className="msgOk">
-            <div className="msgRow"><CheckCircle2 size={16} /><b>Contraseña actualizada</b></div>
-            <div className="msgBody">Listo. Te llevaremos al login en unos segundos.</div>
+            <div className="msgRow"><CheckCircle2 size={16} /><b>¡Contraseña actualizada!</b></div>
+            <div className="msgBody">Ya puedes iniciar sesión con tu nueva clave.</div>
             <div style={{ height: 10 }} />
             <div className="actions">
               <Link to="/login" className="btnPrimary">Ir al login</Link>
@@ -236,7 +245,7 @@ export default function ResetPasswordPage() {
         .lbl { font-size: 12px; font-weight: 700; color: #475569; }
         .inputWrap { display: flex; align-items: center; gap: 10px; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px 12px; }
         .inputWrap input { flex: 1; border: none; outline: none; font-size: 14px; }
-        .eye { border: none; background: none; color: #94a3b8; cursor: pointer; }
+        .eye { border: none; background: none; color: #94a3b8; cursor: pointer; display: flex; }
         .help { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 12px; color: #64748b; }
         .dot { width: 8px; height: 8px; border-radius: 50%; background: #e2e8f0; }
         .dot.ok { background: #10b981; }
@@ -247,8 +256,12 @@ export default function ResetPasswordPage() {
         .btnSecondary { text-decoration: none; color: #64748b; font-size: 12px; font-weight: 700; }
         .spinner { width: 20px; height: 20px; border: 2px solid #f3f3f3; border-top: 2px solid #10b981; border-radius: 50%; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        .msgWarn { background: #fff1f2; border: 1px solid #fecaca; padding: 12px; border-radius: 10px; color: #991b1b; }
-        .msgOk { background: #f0fdf4; border: 1px solid #bbf7d0; padding: 12px; border-radius: 10px; color: #166534; }
+        .state { display: flex; align-items: center; gap: 15px; justify-content: center; padding: 20px 0; }
+        .stateTitle { font-weight: 700; color: #0f172a; }
+        .stateSub { font-size: 12px; color: #64748b; }
+        .msgWarn { background: #fff1f2; border: 1px solid #fecaca; padding: 16px; border-radius: 10px; color: #991b1b; }
+        .msgRow { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+        .msgOk { background: #f0fdf4; border: 1px solid #bbf7d0; padding: 16px; border-radius: 10px; color: #166534; }
       `}</style>
     </div>
   );

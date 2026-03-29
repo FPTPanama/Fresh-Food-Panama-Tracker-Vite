@@ -10,15 +10,15 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 export const supabase = createClient(
-  supabaseUrl || '', 
-  supabaseAnonKey || '', 
+  supabaseUrl, 
+  supabaseAnonKey, 
   {
     auth: {
       persistSession: true,
-      autoRefreshToken: true, 
-      detectSessionInUrl: false, 
-      storageKey: 'ffp-auth-token',
-      flowType: 'pkce' 
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      flowType: 'implicit',
+      storageKey: 'ffp-auth-v3' // Cambiamos a v3 para limpiar caché
     }
   }
 );

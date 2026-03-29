@@ -63,8 +63,6 @@ export function NewClientModal({ isOpen, onClose, onSuccess }: NewClientModalPro
 
     setSaving(true);
     try {
-      // FLUJO CONTROLADO: Solo insertamos en la tabla de base de datos.
-      // No se invoca ninguna función de Auth.
       const payload = {
         name: form.name.trim(),
         tax_id: form.tax_id.trim() || null,
@@ -74,7 +72,7 @@ export function NewClientModal({ isOpen, onClose, onSuccess }: NewClientModalPro
         address: form.address.trim() || null,
         country: form.country.trim() || null,
         logo_url: form.logo_url || null,
-        has_platform_access: false, // IMPORTANTE: El acceso inicia desactivado
+        has_platform_access: false,
         status: 'active'
       };
 
@@ -85,7 +83,7 @@ export function NewClientModal({ isOpen, onClose, onSuccess }: NewClientModalPro
       if (error) throw error;
 
       notify("Cliente registrado en el directorio", "success");
-      onSuccess?.();
+      if (onSuccess) onSuccess();
       onClose();
     } catch (e: any) {
       console.error("Error de registro:", e);
@@ -98,9 +96,8 @@ export function NewClientModal({ isOpen, onClose, onSuccess }: NewClientModalPro
   if (!isOpen) return null;
 
   return (
-    <div className="quote-modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="new-client-modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="quote-modal-card animate-in">
-        {/* Header y Body se mantienen igual para mantener consistencia de UI */}
         <div className="modal-header">
           <div className="header-content">
             <span className="fresh-tag">Directorio de Partners</span>
@@ -111,9 +108,11 @@ export function NewClientModal({ isOpen, onClose, onSuccess }: NewClientModalPro
 
         <div className="modal-body">
           <div className="client-split-layout">
-            {/* ... Sección de Logo ... */}
             <div className="logo-upload-container">
-              <div className={`logo-preview-box ${form.logo_url ? 'has-image' : ''}`} onClick={() => !uploading && fileInputRef.current?.click()}>
+              <div 
+                className={`logo-preview-box ${form.logo_url ? 'has-image' : ''}`} 
+                onClick={() => !uploading && fileInputRef.current?.click()}
+              >
                 {form.logo_url ? (
                   <img src={`https://oqgkbduqztrpfhfclker.supabase.co/storage/v1/object/public/client-logos/${form.logo_url}`} alt="Preview" />
                 ) : (
@@ -128,48 +127,80 @@ export function NewClientModal({ isOpen, onClose, onSuccess }: NewClientModalPro
             </div>
 
             <div className="fields-stack">
-              {/* Sección 1: Datos Fiscales */}
               <div className="row-wrapper">
                 <label className="row-subtitle">1. DATOS FISCALES</label>
                 <div className="fields-row">
                   <div className="input-field flex-3">
                     <Building2 size={16} className="field-icon" />
-                    <input placeholder="Nombre de la Empresa *" value={form.name} onChange={e => setForm({...form, name: e.target.value})} />
+                    <input 
+                      placeholder="Nombre de la Empresa *" 
+                      value={form.name} 
+                      onChange={e => setForm({...form, name: e.target.value})} 
+                    />
                   </div>
                   <div className="input-field flex-2">
                     <Hash size={16} className="field-icon" />
-                    <input placeholder="Tax ID / RUC" value={form.tax_id} onChange={e => setForm({...form, tax_id: e.target.value})} />
+                    <input 
+                      placeholder="Tax ID / RUC" 
+                      value={form.tax_id} 
+                      onChange={e => setForm({...form, tax_id: e.target.value})} 
+                    />
                   </div>
                 </div>
               </div>
 
-              {/* Sección 2: Contacto (No genera usuario todavía) */}
               <div className="row-wrapper">
                 <label className="row-subtitle">2. CONTACTO PRINCIPAL</label>
                 <div className="fields-row">
                   <div className="input-field flex-3">
                     <User size={16} className="field-icon" />
-                    <input placeholder="Nombre de contacto" value={form.contact_name} onChange={e => setForm({...form, contact_name: e.target.value})} />
+                    <input 
+                      placeholder="Nombre de contacto" 
+                      value={form.contact_name} 
+                      onChange={e => setForm({...form, contact_name: e.target.value})} 
+                    />
                   </div>
                   <div className="input-field flex-3">
                     <Mail size={16} className="field-icon" />
-                    <input type="email" placeholder="Email corporativo *" value={form.contact_email} onChange={e => setForm({...form, contact_email: e.target.value})} />
+                    <input 
+                      type="email" 
+                      placeholder="Email corporativo *" 
+                      value={form.contact_email} 
+                      onChange={e => setForm({...form, contact_email: e.target.value})} 
+                    />
                   </div>
                 </div>
               </div>
 
-              {/* Sección 3: Ubicación */}
               <div className="row-wrapper">
-                <label className="row-subtitle">3. UBICACIÓN</label>
+                <label className="row-subtitle">3. UBICACIÓN Y TELÉFONO</label>
                 <div className="fields-row">
                   <div className="input-field flex-3">
                     <MapPin size={16} className="field-icon" />
-                    <input placeholder="Dirección comercial" value={form.address} onChange={e => setForm({...form, address: e.target.value})} />
+                    <input 
+                      placeholder="Dirección comercial" 
+                      value={form.address} 
+                      onChange={e => setForm({...form, address: e.target.value})} 
+                    />
                   </div>
                   <div className="input-field flex-2">
-                    <Globe size={16} className="field-icon" />
-                    <input placeholder="País" value={form.country} onChange={e => setForm({...form, country: e.target.value})} />
+                    <Phone size={16} className="field-icon" />
+                    <input 
+                      placeholder="Teléfono" 
+                      value={form.phone} 
+                      onChange={e => setForm({...form, phone: e.target.value})} 
+                    />
                   </div>
+                </div>
+                <div className="fields-row" style={{ marginTop: '12px' }}>
+                    <div className="input-field flex-1">
+                        <Globe size={16} className="field-icon" />
+                        <input 
+                          placeholder="País" 
+                          value={form.country} 
+                          onChange={e => setForm({...form, country: e.target.value})} 
+                        />
+                    </div>
                 </div>
               </div>
             </div>
@@ -178,14 +209,67 @@ export function NewClientModal({ isOpen, onClose, onSuccess }: NewClientModalPro
 
         <div className="modal-footer">
           <button className="btn-secondary" onClick={onClose}>Cancelar</button>
-          <button className="btn-primary-save" onClick={handleCreate} disabled={saving || uploading || !form.name || !form.contact_email}>
-            {saving ? <Loader2 className="animate-spin" /> : <>Guardar en Directorio <CheckCircle2 size={18}/></>}
+          <button 
+            className="btn-primary-save" 
+            onClick={handleCreate} 
+            disabled={saving || uploading || !form.name || !form.contact_email}
+          >
+            {saving ? <Loader2 className="animate-spin" size={18} /> : <>Guardar en Directorio <CheckCircle2 size={18}/></>}
           </button>
         </div>
       </div>
       
       <style>{`
-        /* Estilos omitidos por brevedad, se mantienen los originales */
+        .new-client-modal-overlay {
+          position: fixed;
+          top: 0; left: 0; right: 0; bottom: 0;
+          background: rgba(15, 23, 42, 0.75);
+          backdrop-filter: blur(4px);
+          display: grid;
+          place-items: center;
+          z-index: 10000;
+          padding: 20px;
+        }
+        .quote-modal-card {
+          background: white;
+          width: 100%;
+          max-width: 850px;
+          border-radius: 24px;
+          box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
+          overflow: hidden;
+        }
+        .animate-in { animation: modalIn 0.3s ease-out; }
+        @keyframes modalIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        
+        .modal-header { padding: 24px 32px; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; background: #f8fafc; }
+        .fresh-tag { font-size: 10px; font-weight: 800; color: #10b981; text-transform: uppercase; letter-spacing: 0.05em; }
+        .modal-header h1 { font-size: 20px; font-weight: 800; color: #0f172a; margin-top: 4px; }
+        .close-btn { background: white; border: 1px solid #e2e8f0; padding: 8px; border-radius: 12px; cursor: pointer; color: #64748b; }
+
+        .modal-body { padding: 32px; max-height: 70vh; overflow-y: auto; }
+        .client-split-layout { display: flex; gap: 32px; }
+        
+        .logo-upload-container { flex-shrink: 0; }
+        .logo-preview-box { width: 140px; height: 140px; border-radius: 20px; border: 2px dashed #e2e8f0; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; transition: 0.2s; position: relative; overflow: hidden; }
+        .logo-preview-box:hover { border-color: #10b981; background: #f0fdf4; }
+        .logo-preview-box img { width: 100%; height: 100%; object-fit: contain; padding: 10px; }
+        .upload-placeholder { display: flex; flex-direction: column; align-items: center; gap: 8px; color: #94a3b8; font-size: 12px; font-weight: 700; }
+        .change-overlay { position: absolute; bottom: 8px; right: 8px; background: white; padding: 6px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); color: #10b981; }
+
+        .fields-stack { flex: 1; display: grid; gap: 24px; }
+        .row-subtitle { font-size: 11px; font-weight: 800; color: #94a3b8; text-transform: uppercase; margin-bottom: 12px; display: block; }
+        .fields-row { display: flex; gap: 16px; }
+        .flex-1 { flex: 1; } .flex-2 { flex: 2; } .flex-3 { flex: 3; }
+        .input-field { position: relative; display: flex; align-items: center; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 0 14px; transition: 0.2s; }
+        .input-field:focus-within { border-color: #10b981; background: white; box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.1); }
+        .field-icon { color: #94a3b8; }
+        .input-field input { width: 100%; padding: 12px 10px; border: none; background: transparent; outline: none; font-size: 14px; font-weight: 600; color: #1e293b; }
+
+        .modal-footer { padding: 24px 32px; background: #f8fafc; border-top: 1px solid #f1f5f9; display: flex; justify-content: flex-end; gap: 12px; }
+        .btn-secondary { padding: 12px 24px; border-radius: 12px; border: 1px solid #e2e8f0; background: white; font-weight: 700; color: #64748b; cursor: pointer; }
+        .btn-primary-save { padding: 12px 28px; border-radius: 12px; border: none; background: #0f172a; color: white; font-weight: 700; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: 0.2s; }
+        .btn-primary-save:hover { background: #1e293b; transform: translateY(-2px); }
+        .btn-primary-save:disabled { opacity: 0.5; cursor: not-allowed; }
       `}</style>
     </div>
   );
