@@ -51,7 +51,7 @@ export const handler: Handler = async (event) => {
      * Esto asegura que el link del correo funcione según el entorno.
      */
     const isLocal = process.env.NETLIFY_DEV === 'true';
-    const prodUrl = "https://fresh-connect-v.netlify.app";
+    const prodUrl = "https://fresh-food-tracker.netlify.app";
     const localUrl = "http://localhost:8888";
     
     const baseUrl = isLocal ? localUrl : prodUrl;
