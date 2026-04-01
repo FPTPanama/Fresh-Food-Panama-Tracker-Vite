@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef } from "react";
-import { Plus, Plane, Ship, Loader2 } from "lucide-react";
+import { Plus, Plane, Ship, Loader2, MapPin } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 
 interface Location {
+  id?: string;
   code: string;
   name: string;
+  city: string;
   country: string;
-  flag: string;
-  type: "AIRPORT" | "PORT";
+  type: "AIR" | "SEA";
 }
 
 export function LocationSelector({ 
@@ -19,15 +20,25 @@ export function LocationSelector({
   onChange: (val: string) => void, 
   mode: "AIR" | "SEA" 
 }) {
-  const [query, setQuery] = useState(value || "");
+  const [query, setQuery] = useState("");
   const [results, setResults] = useState<Location[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
-  // Sincronizar cuando el valor inicial llega de la DB
+  // Sincronización inicial: Si recibimos un código, buscamos su nombre para mostrarlo
   useEffect(() => {
-    setQuery(value || "");
+    if (value && query === "") {
+      const fetchCurrent = async () => {
+        const { data } = await supabase
+          .from('master_locations')
+          .select('name, code')
+          .eq('code', value)
+          .maybeSingle();
+        if (data) setQuery(`${data.code} - ${data.name}`);
+      };
+      fetchCurrent();
+    }
   }, [value]);
 
   useEffect(() => {
@@ -44,6 +55,7 @@ export function LocationSelector({
     setQuery(q);
     if (q.length < 2) { 
       setResults([]); 
+      setIsOpen(false);
       return; 
     }
     
@@ -51,10 +63,10 @@ export function LocationSelector({
     setIsOpen(true);
     
     const { data } = await supabase
-      .from('locations')
+      .from('master_locations')
       .select('*')
-      .or(`name.ilike.%${q}%,code.ilike.%${q}%`)
-      .eq('type', mode === 'AIR' ? 'AIRPORT' : 'PORT')
+      .eq('type', mode)
+      .or(`name.ilike.%${q}%,code.ilike.%${q}%,city.ilike.%${q}%,country.ilike.%${q}%`)
       .limit(6);
 
     setResults((data as Location[]) || []);
@@ -62,39 +74,35 @@ export function LocationSelector({
   };
 
   const handleSelect = (loc: Location) => {
-    setQuery(loc.name);
-    onChange(loc.name);
+    setQuery(`${loc.code} - ${loc.name}`);
+    onChange(loc.code); 
     setIsOpen(false);
   };
 
   const createNewLocation = async () => {
     if (!query) return;
     setLoading(true);
-    
-    // Generar un código simple para evitar nulos en la DB
-    const tempCode = query.substring(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
+    const tempCode = "MAN-" + query.substring(0, 3).toUpperCase(); 
     
     const { data, error } = await supabase
-      .from('locations')
+      .from('master_locations')
       .insert([{
         code: tempCode,
         name: query,
-        country: 'Destino', // Etiqueta genérica ya que omitimos país automático
-        type: mode === 'AIR' ? 'AIRPORT' : 'PORT',
-        flag: mode === 'AIR' ? '✈️' : '⚓'
+        city: 'Manual',
+        country: 'Destino Nuevo',
+        type: mode
       }])
       .select();
 
     setLoading(false);
-    if (!error && data) {
-      handleSelect(data[0]);
-    }
+    if (!error && data) handleSelect(data[0]);
   };
 
   return (
-    <div className="location-wrapper" ref={wrapperRef}>
-      <div className="input-group">
-        <div className="icon-prefix">
+    <div className="ff-location-wrapper" ref={wrapperRef}>
+      <div className="ff-location-input-group">
+        <div className="ff-location-icon-prefix">
           {mode === 'AIR' ? <Plane size={16} /> : <Ship size={16} />}
         </div>
         <input 
@@ -102,62 +110,69 @@ export function LocationSelector({
           value={query} 
           onChange={(e) => searchLocations(e.target.value)}
           onFocus={() => query.length >= 2 && setIsOpen(true)}
-          placeholder={mode === 'AIR' ? "Ej: AMS o Schiphol..." : "Ej: ROT o Rotterdam..."}
+          placeholder={mode === 'AIR' ? "Buscar Aeropuerto..." : "Buscar Puerto..."}
         />
-        {loading && <Loader2 size={14} className="spin" />}
+        {loading && <Loader2 size={14} className="ff-spin" />}
       </div>
 
       {isOpen && (
-        <div className="dropdown">
+        <div className="ff-location-dropdown">
           {results.map((loc) => (
-            <div key={loc.code} className="option" onClick={() => handleSelect(loc)}>
-              <span className="flag">{loc.flag || (loc.type === 'PORT' ? '⚓' : '✈️')}</span>
-              <div className="details">
-                <span className="name">{loc.name}</span>
-                <span className="sub">{loc.code} • {loc.country}</span>
+            <div key={loc.code} className="ff-location-option" onClick={() => handleSelect(loc)}>
+              <div className="ff-location-loc-icon">
+                <MapPin size={14} />
+              </div>
+              <div className="ff-location-details">
+                <div className="ff-location-main-info">
+                  <span className="ff-location-code-tag">{loc.code}</span>
+                  <span className="ff-location-name">{loc.name}</span>
+                </div>
+                <span className="ff-location-sub">{loc.city}, {loc.country}</span>
               </div>
             </div>
           ))}
 
           {results.length === 0 && !loading && query.length >= 3 && (
-            <div className="option create-new" onClick={createNewLocation}>
+            <div className="ff-location-option ff-location-create-new" onClick={createNewLocation}>
               <Plus size={14} />
-              <span>Crear <b>&quot;{query}&quot;</b> como nuevo destino</span>
+              <span>Añadir <b>"{query}"</b> personalizado</span>
             </div>
           )}
         </div>
       )}
 
-      <style jsx>{`
-        .location-wrapper { position: relative; width: 100%; }
-        .input-group { 
+      {/* Reemplazamos style jsx por un tag de estilo estándar compatible con Vite/React */}
+      <style>{`
+        .ff-location-wrapper { position: relative; width: 100%; }
+        .ff-location-input-group { 
           display: flex; align-items: center; background: #f8fafc;
-          border: 1px solid #e2e8f0; border-radius: 12px; padding: 0 12px;
-          transition: border 0.2s;
+          border: 2px solid #e2e8f0; border-radius: 12px; padding: 0 12px;
+          transition: all 0.2s ease;
         }
-        .input-group:focus-within { border-color: #3b82f6; background: white; }
-        .icon-prefix { color: #94a3b8; margin-right: 10px; }
-        input { 
-          flex: 1; border: none; padding: 11px 0; outline: none; 
-          font-size: 14px; color: #1e293b; font-weight: 700; background: transparent;
+        .ff-location-input-group:focus-within { border-color: #22c55e; background: white; }
+        .ff-location-icon-prefix { color: #94a3b8; }
+        .ff-location-input-group input { 
+          flex: 1; border: none !important; padding: 14px 12px !important; outline: none !important; 
+          font-size: 14px; color: #1e293b; font-weight: 700; background: transparent !important;
         }
-        .dropdown { 
-          position: absolute; top: calc(100% + 5px); left: 0; right: 0; z-index: 100;
-          background: white; border: 1px solid #e2e8f0; border-radius: 12px;
-          box-shadow: 0 12px 30px rgba(0,0,0,0.1); overflow: hidden;
+        .ff-location-dropdown { 
+          position: absolute; top: calc(100% + 8px); left: 0; right: 0; z-index: 9999;
+          background: white; border: 1px solid #e2e8f0; border-radius: 16px;
+          box-shadow: 0 20px 40px rgba(0,0,0,0.12); overflow: hidden;
         }
-        .option { 
-          display: flex; align-items: center; gap: 12px; padding: 10px 15px;
-          cursor: pointer; transition: background 0.2s;
+        .ff-location-option { 
+          display: flex; align-items: center; gap: 14px; padding: 12px 16px;
+          cursor: pointer; border-bottom: 1px solid #f1f5f9;
         }
-        .option:hover { background: #f1f5f9; }
-        .flag { font-size: 18px; width: 24px; text-align: center; }
-        .details { display: flex; flex-direction: column; }
-        .name { font-size: 13px; font-weight: 800; color: #0f172a; }
-        .sub { font-size: 10px; color: #64748b; font-weight: 700; text-transform: uppercase; }
-        .create-new { color: #166534; background: #f0fdf4; border-top: 1px solid #dcfce7; }
-        .spin { animation: rotate 1s linear infinite; color: #94a3b8; }
-        @keyframes rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .ff-location-option:hover { background: #f0fdf4; }
+        .ff-location-loc-icon { color: #22c55e; }
+        .ff-location-details { display: flex; flex-direction: column; }
+        .ff-location-code-tag { background: #0f172a; color: white; font-size: 10px; padding: 2px 6px; border-radius: 4px; margin-right: 8px; font-weight: 800; }
+        .ff-location-name { font-size: 13px; font-weight: 700; color: #1e293b; }
+        .ff-location-sub { font-size: 11px; color: #64748b; text-transform: uppercase; }
+        .ff-location-create-new { color: #15803d; background: #f0fdf4; }
+        .ff-spin { animation: ff-rotate 1s linear infinite; color: #22c55e; }
+        @keyframes ff-rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
     </div>
   );

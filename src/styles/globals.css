@@ -120,9 +120,17 @@ a {
 }
 
 .ff-top__logo {
-  height: 52px; /* Tu tamaño deseado */
-  width: auto;
+  height: 48px;          /* Altura ideal para un header de 85px */
+  width: auto;           /* Permite que el ancho crezca proporcionalmente */
+  max-width: 165px;      /* Evita que un logo muy largo empuje el menú */
   display: block;
+  object-fit: contain;   /* Mantiene la integridad de la imagen */
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.ff-top__logo:hover {
+  transform: scale(1.02); /* Feedback sutil de UI al usuario */
 }
 
 .ff-top__titleWrap {
@@ -623,3 +631,4 @@ body {
   font-size: 0.7rem;
   color: #bbb;
 }
+

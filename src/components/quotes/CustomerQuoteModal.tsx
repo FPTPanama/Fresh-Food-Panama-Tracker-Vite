@@ -12,6 +12,18 @@ interface QuickQuoteModalProps {
   initialCustomerName?: string;
 }
 
+// MATRIZ DE COMPATIBILIDAD LOGÍSTICA
+const LOGISTICS_MATRIX = {
+  AIR: {
+    defaultIncoterm: "CIP",
+    allowedIncoterms: ["CIP", "CPT", "DDP"]
+  },
+  SEA: {
+    defaultIncoterm: "FOB",
+    allowedIncoterms: ["FOB", "CFR", "DDP"]
+  }
+};
+
 export function CustomerQuoteModal({ isOpen, onClose, initialCustomerName }: QuickQuoteModalProps) {
   const [products, setProducts] = useState<any[]>([]);
   const [varieties, setVarieties] = useState<any[]>([]);
@@ -40,6 +52,12 @@ export function CustomerQuoteModal({ isOpen, onClose, initialCustomerName }: Qui
       resetForm();
     }
   }, [isOpen]);
+
+  // Sincronizar Incoterm cuando cambia el modo de transporte
+  useEffect(() => {
+    const matrix = LOGISTICS_MATRIX[form.mode];
+    setForm(prev => ({ ...prev, incoterm: matrix.defaultIncoterm }));
+  }, [form.mode]);
 
   async function resetForm() {
     setForm({ 
@@ -140,7 +158,7 @@ export function CustomerQuoteModal({ isOpen, onClose, initialCustomerName }: Qui
         `Hola Fresh Food, solicito cotización:\n\n` +
         `👤 *Cliente:* ${clientData.name}\n` +
         `📦 *Producto:* ${prod} (${varName})\n` +
-        `✈️ *Modo:* ${form.mode}\n` +
+        `✈️ *Modo:* ${form.mode} (${form.incoterm})\n` +
         `📍 *Destino:* ${form.destination}\n` +
         `📅 *Embarque:* ${form.shipmentDate || 'A convenir'}\n` +
         `🔢 *Cantidad:* ${form.boxes} cajas\n` +
@@ -175,7 +193,7 @@ export function CustomerQuoteModal({ isOpen, onClose, initialCustomerName }: Qui
             ) : (
               <div className="ff-client-card">
                 <div className="ff-avatar">
-                  {clientData?.logo_url ? <img src={`https://oqgkbduqztrpfhfclker.supabase.co/storage/v1/object/public/client-logos/${clientData.logo_url}`} alt="logo" /> : <div className="ff-avatar-fallback">{clientData?.name.charAt(0)}</div>}
+                  {clientData?.logo_url ? <img src={`https://oqgkbduqztrpfhfclker.supabase.co/storage/v1/object/public/client-logos/${clientData.logo_url}`} alt="logo" /> : <div className="ff-avatar-fallback">{clientData?.name?.charAt(0)}</div>}
                 </div>
                 <div className="ff-client-info">
                   <h3>{clientData?.name}</h3>
@@ -212,7 +230,7 @@ export function CustomerQuoteModal({ isOpen, onClose, initialCustomerName }: Qui
 
           {/* SECCIÓN 3: LOGÍSTICA Y RUTA */}
           <div className="ff-form-group">
-            <label className="ff-label-mini">LOGÍSTICA Y RUTA</label>
+            <label className="ff-label-mini">LOGÍSTICA Y RUTA (INTELIGENTE)</label>
             <div className="ff-input-row">
               <div className="ff-mode-selector">
                 <button className={form.mode === 'AIR' ? 'active air' : ''} onClick={() => setForm({...form, mode: 'AIR'})}>
@@ -224,12 +242,18 @@ export function CustomerQuoteModal({ isOpen, onClose, initialCustomerName }: Qui
               </div>
               <div className="ff-field flex-1 has-label">
                 <span className="ff-label-float">INCOTERM</span>
-                <select value={form.incoterm} onChange={e => setForm({...form, incoterm: e.target.value})} className="ff-select-clean">
-                  <option>CIP</option><option>FOB</option><option>CFR</option><option>DDP</option><option>CPT</option>
+                <select 
+                  value={form.incoterm} 
+                  onChange={e => setForm({...form, incoterm: e.target.value})} 
+                  className="ff-select-clean"
+                >
+                  {LOGISTICS_MATRIX[form.mode].allowedIncoterms.map(inc => (
+                    <option key={inc} value={inc}>{inc}</option>
+                  ))}
                 </select>
               </div>
-              <div className="ff-field flex-3">
-                <MapPin size={18} className="ff-icon-fixed" />
+              <div className="ff-field flex-3 ff-field-overflow">
+                
                 <div className="ff-location-wrapper">
                   <LocationSelector value={form.destination} onChange={(val) => setForm({...form, destination: val})} mode={form.mode} />
                 </div>
@@ -237,7 +261,7 @@ export function CustomerQuoteModal({ isOpen, onClose, initialCustomerName }: Qui
             </div>
           </div>
 
-          {/* SECCIÓN 4: FECHA Y NOTAS (CORREGIDO ALINEACIÓN Y ANCHOS) */}
+          {/* SECCIÓN 4: FECHA Y NOTAS */}
           <div className="ff-input-row">
             <div className="ff-field flex-1 has-label">
               <span className="ff-label-float">FECHA DE EMBARQUE</span>
@@ -267,47 +291,37 @@ export function CustomerQuoteModal({ isOpen, onClose, initialCustomerName }: Qui
       </div>
 
       <style>{`
+        /* --- ESTILOS BASE PRESERVADOS --- */
         .ff-modal-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(10px); display: flex; align-items: center; justify-content: center; z-index: 9999; padding: 20px; }
         .ff-modal-card { background: white; width: 100%; max-width: 850px; border-radius: 32px; overflow: hidden; box-shadow: 0 40px 100px -20px rgba(0, 0, 0, 0.4); }
         .ff-modal-header { padding: 35px 45px 10px; display: flex; justify-content: space-between; align-items: center; }
         .ff-tag { color: #22c55e; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 2px; }
         .ff-modal-header h2 { margin: 4px 0 0; font-size: 28px; color: #0f172a; font-weight: 900; letter-spacing: -1px; }
         .ff-close-x { background: #f1f5f9; border: none; width: 40px; height: 40px; border-radius: 50%; cursor: pointer; color: #64748b; display: flex; align-items: center; justify-content: center; }
-        
         .ff-modal-body { padding: 10px 45px 35px; display: flex; flex-direction: column; gap: 20px; }
         .ff-section-wrapper { display: flex; flex-direction: column; gap: 8px; }
         .ff-label-mini { font-size: 10px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
-        
         .ff-client-card { display: flex; align-items: center; gap: 20px; padding: 12px 20px; background: #f0fdf4; border: 2px solid #dcfce7; border-radius: 20px; }
         .ff-avatar { width: 45px; height: 45px; border-radius: 12px; background: white; border: 1px solid #e2e8f0; overflow: hidden; display: flex; align-items: center; justify-content: center; }
         .ff-avatar img { width: 100%; height: 100%; object-fit: contain; padding: 4px; }
         .ff-avatar-fallback { background: #22c55e; color: white; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-weight: 800; }
         .ff-client-info h3 { margin: 0; font-size: 17px; font-weight: 800; color: #1e293b; }
         .ff-client-info p { margin: 0; font-size: 11px; color: #64748b; font-weight: 600; }
-        .ff-client-info span { font-family: monospace; color: #22c55e; font-weight: 700; }
-
         .ff-input-row { display: flex; gap: 12px; align-items: stretch; width: 100%; }
         
-        /* FIX DEFINITIVO DE ICONOS Y PADDING */
+        /* FIX DE OVERFLOW PARA EL DROPDOWN DE LOCALIZACIONES */
         .ff-field { position: relative; background: #f8fafc; border: 2px solid #e2e8f0; border-radius: 16px; min-height: 56px; display: flex; align-items: center; transition: 0.2s; overflow: hidden; }
+        .ff-field-overflow { overflow: visible !important; z-index: 20; }
         .ff-field:focus-within { border-color: #22c55e; background: white; }
         
         .ff-icon-fixed { position: absolute; left: 16px; color: #94a3b8; pointer-events: none; z-index: 10; }
         .ff-icon-area-fixed { position: absolute; left: 16px; top: 18px; color: #94a3b8; pointer-events: none; z-index: 10; }
-
         .ff-field select, .ff-field input { background: transparent !important; border: none !important; width: 100%; height: 100%; padding: 0 15px 0 52px !important; font-size: 14px; font-weight: 700; color: #1e293b; outline: none; z-index: 5; }
-        
-        /* ELIMINAR FLECHAS NATIVAS DE SELECT */
-        .ff-select-clean { appearance: none; -webkit-appearance: none; -moz-appearance: none; cursor: pointer; }
-
-        /* FIX LABELS FLOTANTES */
+        .ff-select-clean { appearance: none; cursor: pointer; }
         .ff-label-float { position: absolute; top: 10px; left: 52px; font-size: 8px; font-weight: 900; color: #94a3b8; text-transform: uppercase; pointer-events: none; z-index: 10; }
         .ff-field.has-label input, .ff-field.has-label select { padding-top: 18px !important; }
         
-        /* FIX LOCATION SELECTOR */
         .ff-location-wrapper { flex: 1; width: 100%; z-index: 5; }
-        .ff-location-wrapper input { padding-left: 52px !important; border: none !important; background: transparent !important; height: 52px !important; }
-        
         .ff-mode-selector { display: flex; background: #f1f5f9; padding: 4px; border-radius: 16px; gap: 4px; border: 2px solid #e2e8f0; }
         .ff-mode-selector button { border: none; width: 48px; height: 44px; border-radius: 12px; cursor: pointer; color: #94a3b8; background: transparent; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
         .ff-mode-selector button.active.air { background: #22c55e; color: white; }
@@ -315,12 +329,9 @@ export function CustomerQuoteModal({ isOpen, onClose, initialCustomerName }: Qui
         
         .ff-field-area { position: relative; background: #f8fafc; border: 2px solid #e2e8f0; border-radius: 16px; display: flex; align-items: center; min-height: 56px; }
         .ff-field-area textarea { width: 100%; border: none; background: transparent; outline: none; font-size: 14px; font-weight: 600; padding: 18px 15px 12px 52px; resize: none; color: #1e293b; z-index: 5; }
-
         .ff-modal-footer { padding: 30px 45px 45px; display: flex; gap: 15px; }
         .ff-btn-system { flex: 1; height: 56px; border-radius: 18px; border: 2px solid #0f172a; background: white; font-weight: 800; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; transition: 0.2s; }
-        .ff-btn-system:hover { background: #f8fafc; }
-        .ff-btn-wa { flex: 1.5; height: 56px; border-radius: 18px; border: none; background: #25d366; color: white; font-weight: 900; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; box-shadow: 0 8px 20px rgba(37, 211, 102, 0.2); transition: 0.2s; }
-        .ff-btn-wa:hover { transform: translateY(-2px); box-shadow: 0 12px 25px rgba(37, 211, 102, 0.3); }
+        .ff-btn-wa { flex: 1.5; height: 56px; border-radius: 18px; border: none; background: #25d366; color: white; font-weight: 900; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; box-shadow: 0 8px 20px rgba(37, 211, 102, 0.2); }
         
         .flex-1 { flex: 1; } .flex-2 { flex: 2; } .flex-3 { flex: 3; }
         .disabled { opacity: 0.5; pointer-events: none; }

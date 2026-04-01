@@ -56,8 +56,8 @@ export default function ShipmentsPage() {
               <p>TAX ID: {items[0]?.clients?.tax_id || '—'} | {items[0]?.clients?.billing_address || '—'}</p>
             </div>
           </div>
-          <button className="ff-quote-btn" onClick={() => window.open('https://wa.me/34932620121', '_blank')}>
-            <Plus size={16} /> SOLICITAR CARGA
+          <button className="ff-quote-btn" onClick={() => window.open('https://wa.me/50762256452', '_blank')}>
+            <Plus size={16} /> Asistencia
           </button>
         </div>
 

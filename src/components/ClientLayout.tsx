@@ -8,7 +8,7 @@ import {
   UserCircle2, ChevronLeft, ChevronRight, FileText, LayoutDashboard
 } from "lucide-react";
 
-const LOGO_SRC = "/brand/freshfood-logo.svg";
+const LOGO_SRC = "/brand/freshconnect_verde.svg";
 const LS_KEY = "ff_client_sidebar_collapsed";
 
 interface ClientLayoutProps {
@@ -87,15 +87,13 @@ export function ClientLayout({ title, subtitle, children, wide = false }: Client
       <header className="ff-top">
         <div className="ff-top__inner">
           <div className="ff-top__left">
-            <img 
-              src={LOGO_SRC} 
-              alt="FF" 
-              width={40} 
-              height={40} 
-              className="ff-top__logo" 
-              onClick={() => navigate('/clients/dashboard')} 
-              style={{cursor:'pointer'}} 
-            />
+         <img 
+  src={LOGO_SRC} 
+  alt="Fresh Food Panamá" 
+  className="ff-top__logo" 
+  onClick={() => navigate('/clients/dashboard')} 
+  // Eliminamos el style inline para que todo sea controlado desde globals.css
+/>
             <div className="ff-v-sep" style={{ width: '1px', height: '24px', background: '#e2e8f0', margin: '0 16px' }} />
             <div className="ff-top__titleWrap">
               {title && <h1 className="ff-top__title">{title}</h1>}

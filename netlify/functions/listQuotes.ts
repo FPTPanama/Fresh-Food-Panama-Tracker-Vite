@@ -10,11 +10,9 @@ export const handler: Handler = async (event) => {
     const { user, profile } = await getUserAndProfile(event);
     if (!user || !profile) return text(401, "Unauthorized");
     
-    // --- CAMBIO CLAVE: LÓGICA DE ACCESO DUAL ---
     const isAdmin = isPrivilegedRole(profile.role);
     const isClient = profile.role === 'client';
 
-    // Si no es admin ni cliente, fuera.
     if (!isAdmin && !isClient) return text(403, "Forbidden");
 
     const pageSize = 20;
@@ -30,7 +28,7 @@ export const handler: Handler = async (event) => {
       .from("quotes")
       .select(`
         id, 
-        code:quote_number, 
+        quote_number, 
         created_at, 
         updated_at, 
         status, 
@@ -44,20 +42,16 @@ export const handler: Handler = async (event) => {
         client_id, 
         client_snapshot, 
         totals,
+        product_details, 
         clients (
           name, 
           contact_email
         )
       `, { count: "exact" });
 
-    // --- FILTRO DE SEGURIDAD PARA CLIENTES ---
     if (isClient) {
-      // Si es cliente, OBLIGATORIAMENTE filtramos por su client_id
-      if (!profile.client_id) return json(200, { items: [], total: 0 }); // Seguridad extra
+      if (!profile.client_id) return json(200, { items: [], total: 0 });
       query = query.eq("client_id", profile.client_id);
-      
-      // Además, el cliente no debería ver borradores internos (opcional pero recomendado)
-      // query = query.neq("status", "draft"); 
     }
 
     if (status) query = query.eq("status", status);
@@ -71,25 +65,36 @@ export const handler: Handler = async (event) => {
       .range(fromIndex, toIndex);
 
     const { data, count, error } = await query;
-    if (error) throw error;
+    
+    if (error) {
+      console.error("Error de Supabase:", error);
+      throw error;
+    }
 
-    const items = (data || []).map((r: any) => ({
-      id: r.id,
-      quote_number: r.code || "S/N",
-      created_at: r.created_at,
-      updated_at: r.updated_at,
-      status: r.status,
-      mode: r.mode,
-      currency: r.currency,
-      destination: r.destination,
-      boxes: r.boxes,
-      weight_kg: r.weight_kg,
-      margin_markup: r.margin_markup,
-      client_id: r.client_id,
-      client_name: r.clients?.name || r.client_snapshot?.name || "Sin Nombre",
-      client_email: r.clients?.contact_email || r.client_snapshot?.contact_email || null,
-      total: r.total || 0,
-    }));
+    const items = (data || []).map((r: any) => {
+      // ✅ LOGICA DE TOTALES: Prioridad al valor calculado en el JSON 'totals'
+      // Esto soluciona el problema de los totales en 0 cuando la columna 'total' no está sincronizada.
+      const finalTotal = r.totals?.total ?? r.total ?? 0;
+
+      return {
+        id: r.id,
+        quote_number: r.quote_number || "S/N",
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+        status: r.status,
+        mode: r.mode,
+        currency: r.currency,
+        destination: r.destination,
+        boxes: r.boxes,
+        weight_kg: r.weight_kg,
+        margin_markup: r.margin_markup,
+        client_id: r.client_id,
+        client_name: r.clients?.name || r.client_snapshot?.name || "Sin Nombre",
+        client_email: r.clients?.contact_email || r.client_snapshot?.contact_email || null,
+        total: finalTotal, 
+        product_details: r.product_details || {} 
+      };
+    });
 
     return json(200, {
       items,
@@ -101,7 +106,7 @@ export const handler: Handler = async (event) => {
     });
 
   } catch (e: any) {
-    console.error("Error en listQuotes:", e.message);
+    console.error("Error fatal en listQuotes:", e.message);
     return text(500, e?.message || "Server error");
   }
 };

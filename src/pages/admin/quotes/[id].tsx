@@ -3,7 +3,8 @@ import { useParams, useNavigate } from "react-router-dom";
 import { 
   Save, FileText, Loader2, Plane, Ship, 
   Thermometer, Droplets, Calculator, MapPin, Shield, ArrowRight, Package,
-  Maximize, AlertCircle, TrendingDown, ChevronLeft, ChevronRight
+  Maximize, AlertCircle, TrendingDown, ChevronLeft, ChevronRight,
+  Calendar, MessageSquare 
 } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
 import { getApiBase } from "../../../lib/apiBase";
@@ -13,7 +14,7 @@ import { LocationSelector } from "../../../components/LocationSelector";
 
 // --- CONSTANTES ---
 const GLOBAL_MARGIN_THRESHOLD = 10.0; 
-const LOGS_PER_PAGE = 5; // Límite solicitado
+const LOGS_PER_PAGE = 5; 
 
 const FIELD_LABELS: { [key: string]: string } = {
   boxes: "Cajas",
@@ -63,8 +64,12 @@ export default function AdminQuoteDetailPage() {
   const [varieties, setVarieties] = useState<string[]>([]);
   const [logs, setLogs] = useState<any[]>([]); 
   
-  // Paginación
   const [currentPage, setCurrentPage] = useState(1);
+
+  // Estados del Chatter
+  const [messages, setMessages] = useState<any[]>([]);
+  const [newMessage, setNewMessage] = useState("");
+  const [sendingMsg, setSendingMsg] = useState(false);
 
   const [status, setStatus] = useState("draft");
   const [boxes, setBoxes] = useState(0);
@@ -78,6 +83,7 @@ export default function AdminQuoteDetailPage() {
   const [color, setColor] = useState("");
   const [brix, setBrix] = useState("");
   const [caliber, setCaliber] = useState(""); 
+  const [shipmentDate, setShipmentDate] = useState(""); 
   const [termsConditions, setTermsConditions] = useState(DEFAULT_TERMS);
 
   const [costs, setCosts] = useState<CostState>({
@@ -121,7 +127,6 @@ export default function AdminQuoteDetailPage() {
     return { lines, totalCost, totalSale, profit, perBox, globalMargin, isRisk };
   }, [costs, boxes, weightKg]);
 
-  // Lógica de Paginación de Logs
   const paginatedLogs = useMemo(() => {
     const start = (currentPage - 1) * LOGS_PER_PAGE;
     return logs.slice(start, start + LOGS_PER_PAGE);
@@ -137,6 +142,25 @@ export default function AdminQuoteDetailPage() {
       .eq("quote_id", id)
       .order("created_at", { ascending: false });
     if (logsData) setLogs(logsData);
+  }, [id]);
+
+  const loadChatAndClearNotify = useCallback(async () => {
+    if (!id) return;
+    
+    await supabase
+      .from('quote_activity')
+      .update({ is_read: true })
+      .eq('quote_id', id)
+      .eq('is_read', false)
+      .eq('sender_role', 'client');
+
+    const { data: chatData } = await supabase
+      .from('quote_activity')
+      .select('*')
+      .eq('quote_id', id)
+      .order('created_at', { ascending: true });
+
+    if (chatData) setMessages(chatData);
   }, [id]);
 
   const loadData = useCallback(async () => {
@@ -164,6 +188,7 @@ export default function AdminQuoteDetailPage() {
         setColor(det.color || "");
         setBrix(det.brix || "");
         setCaliber(det.caliber || "");
+        setShipmentDate(det.requested_shipment_date || ""); 
 
         if (q.product_id) {
           const prod = pRes.data?.find(p => p.id === q.product_id);
@@ -187,8 +212,9 @@ export default function AdminQuoteDetailPage() {
         setPallets(Number(m.pallets || 0));
       }
       loadLogs();
+      loadChatAndClearNotify();
     } catch (err) { console.error(err); } finally { setLoading(false); }
-  }, [id, loadLogs]);
+  }, [id, loadLogs, loadChatAndClearNotify]);
 
   useEffect(() => {
     (async () => {
@@ -204,6 +230,37 @@ export default function AdminQuoteDetailPage() {
   const updateCostLine = (key: string, field: 'base' | 'unitSale', value: string) => {
     const numValue = value === "" ? 0 : parseFloat(value);
     setCosts((prev) => ({ ...prev, [key]: { ...prev[key], [field]: numValue } }));
+  };
+
+  const handleSendMessage = async () => {
+    if (!newMessage.trim() || !id) return;
+    setSendingMsg(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+
+      if (!user) {
+        setToast("Error: Sesión expirada");
+        return;
+      }
+
+      const { error } = await supabase.from('quote_activity').insert({
+        quote_id: id,
+        sender_id: user.id,
+        sender_role: 'admin',
+        message: newMessage.trim(),
+        is_read: true 
+      });
+
+      if (!error) {
+        setNewMessage("");
+        loadChatAndClearNotify();
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSendingMsg(false);
+    }
   };
 
   async function handleSave() {
@@ -236,7 +293,10 @@ export default function AdminQuoteDetailPage() {
           meta: { incoterm, place, pallets: Number(pallets) }
         },
         product_id: productId || null,
-        product_details: { variety, color, brix, caliber }
+        product_details: { 
+          variety, color, brix, caliber,
+          requested_shipment_date: shipmentDate 
+        }
       };
 
       const { data: { session } } = await supabase.auth.getSession();
@@ -321,9 +381,9 @@ export default function AdminQuoteDetailPage() {
           <div className="strip-grid">
             <div className="f"><label>Producto</label><select value={productId} onChange={e => handleProductChange(e.target.value)}><option value="">Seleccionar...</option>{products.map(p => (<option key={p.id} value={p.id}>{p.name}</option>))}</select></div>
             <div className="f"><label>Variedad</label><select value={variety} onChange={e => setVariety(e.target.value)}><option value="">Seleccionar...</option>{varieties.map((v, i) => (<option key={i} value={v}>{v}</option>))}</select></div>
-            <div className="f"><label><Maximize size={10}/> Calibre</label><input value={caliber} onChange={e => setCaliber(e.target.value)} /></div>
-            <div className="f"><label><Thermometer size={10}/> Color</label><input value={color} onChange={e => setColor(e.target.value)} /></div>
-            <div className="f"><label><Droplets size={10}/> Brix</label><input value={brix} onChange={e => setBrix(e.target.value)} /></div>
+            <div className="f"><label><Maximize size={10}/> Calibre</label><input value={caliber} onChange={e => setCaliber(e.target.value)} placeholder="Ej: 5-6" /></div>
+            <div className="f"><label><Thermometer size={10}/> Color</label><input value={color} onChange={e => setColor(e.target.value)} placeholder="Ej: 2.5 - 3" /></div>
+            <div className="f"><label><Droplets size={10}/> Brix</label><input value={brix} onChange={e => setBrix(e.target.value)} placeholder="Ej: > 13" /></div>
           </div>
         </div>
 
@@ -331,12 +391,50 @@ export default function AdminQuoteDetailPage() {
         <div className="ff-card strip blue">
           <div className="strip-label">LOGÍSTICA</div>
           <div className="strip-grid">
-            <div className="f" style={{flex: 0.6}}><label>Modo</label><div className="toggle"><button className={mode==='AIR'?'active':''} onClick={()=>setMode('AIR')}><Plane size={14}/></button><button className={mode==='SEA'?'active':''} onClick={()=>setMode('SEA')}><Ship size={14}/></button></div></div>
-            <div className="f" style={{flex: 0.6}}><label>Incoterm</label><select value={incoterm} onChange={e => setIncoterm(e.target.value)}><option value="EXW">EXW</option><option value="FOB">FOB</option><option value="CIP">CIP</option><option value="CIF">CIF</option><option value="DDP">DDP</option></select></div>
-            <div className="f" style={{flex: 2}}><label>Destino</label><LocationSelector mode={mode} value={place} onChange={setPlace}/></div>
-            <div className="f small"><label>Cajas</label><input type="number" className="no-spin" value={boxes} onChange={e => setBoxes(Number(e.target.value))}/></div>
-            <div className="f small"><label>Pallets</label><input type="number" className="no-spin" value={pallets} onChange={e => setPallets(Number(e.target.value))}/></div>
-            <div className="f small"><label>Peso (Kg)</label><input type="number" className="no-spin" value={weightKg} onChange={e => setWeightKg(Number(e.target.value))}/></div>
+            <div className="f" style={{ flex: "0 0 85px" }}>
+              <label>Modo</label>
+              <div className="toggle">
+                <button className={mode === 'AIR' ? 'active' : ''} onClick={() => setMode('AIR')}><Plane size={14} /></button>
+                <button className={mode === 'SEA' ? 'active' : ''} onClick={() => setMode('SEA')}><Ship size={14} /></button>
+              </div>
+            </div>
+
+            <div className="f" style={{ flex: "0 0 90px" }}>
+              <label>Incoterm</label>
+              <select value={incoterm} onChange={e => setIncoterm(e.target.value)}>
+                <option value="EXW">EXW</option><option value="FOB">FOB</option><option value="CIP">CIP</option><option value="CIF">CIF</option><option value="DDP">DDP</option>
+              </select>
+            </div>
+
+            <div className="f" style={{ flex: "1", minWidth: "180px" }}>
+              <label>Destino</label>
+              <LocationSelector mode={mode} value={place} onChange={setPlace} />
+            </div>
+            
+            <div className="f" style={{ flex: "0 0 130px" }} title="Fecha estimada de embarque (Estimated Time of Departure)">
+              <label className="ff-help-cursor"><Calendar size={10} /> ETD</label>
+              <input 
+                type="date" 
+                value={shipmentDate} 
+                onChange={e => setShipmentDate(e.target.value)} 
+                className="ff-input-compact no-spin"
+              />
+            </div>
+
+            <div className="f" style={{ flex: "0 0 80px" }}>
+              <label>Cajas</label>
+              <input type="number" className="no-spin" value={boxes} onChange={e => setBoxes(Number(e.target.value))} />
+            </div>
+
+            <div className="f" style={{ flex: "0 0 80px" }}>
+              <label>Pallets</label>
+              <input type="number" className="no-spin" value={pallets} onChange={e => setPallets(Number(e.target.value))} />
+            </div>
+
+            <div className="f" style={{ flex: "0 0 90px" }}>
+              <label>Peso (Kg)</label>
+              <input type="number" className="no-spin" value={weightKg} onChange={e => setWeightKg(Number(e.target.value))} />
+            </div>
           </div>
         </div>
 
@@ -372,6 +470,46 @@ export default function AdminQuoteDetailPage() {
         <div className="ff-card" style={{ borderLeft: '4px solid #f59e0b' }}>
           <div className="table-h" style={{ color: '#b45309' }}><AlertCircle size={18}/> <span>Términos Contractuales</span></div>
           <textarea className="terms-editor" value={termsConditions} onChange={(e) => setTermsConditions(e.target.value)} />
+        </div>
+
+        {/* --- CHATTER LOGÍSTICO --- */}
+        <div className="ff-card chatter-box">
+          <div className="table-h">
+            <MessageSquare size={18} color="#3b82f6"/> 
+            <span>Chat de Negociación</span>
+          </div>
+          
+          <div className="chat-viewport">
+            {messages.length === 0 && (
+              <div className="empty-chat">No hay mensajes en esta cotización.</div>
+            )}
+            {messages.map((m) => (
+              <div key={m.id} className={`chat-bubble-wrapper ${m.sender_role}`}>
+                <div className="chat-bubble">
+                  <div className="bubble-meta">
+                    {m.sender_role === 'admin' ? 'Tú (Admin)' : 'Cliente'} • {new Date(m.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                  </div>
+                  <div className="bubble-text">{m.message}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="chat-input-area">
+            <textarea 
+              placeholder="Escribe una respuesta al cliente..."
+              value={newMessage}
+              onChange={(e) => setNewMessage(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSendMessage())}
+            />
+            <button 
+              onClick={handleSendMessage} 
+              disabled={sendingMsg || !newMessage.trim()}
+              className="btn-send"
+            >
+              {sendingMsg ? <Loader2 size={16} className="spin" /> : <ArrowRight size={18} />}
+            </button>
+          </div>
         </div>
 
         {/* --- HISTORIAL CON PAGINACIÓN --- */}
@@ -465,15 +603,41 @@ export default function AdminQuoteDetailPage() {
         .pill.red { background: #fee2e2; color: #b91c1c; border-color: #fecaca; }
         .pill.gray { background: #f8fafc; color: #475569; border-color: #e2e8f0; }
         .pill.orange { background: #fff7ed; color: #c2410c; border-color: #ffedd5; }
+        
         .strip { display: flex; gap: 20px; align-items: center; padding: 12px 20px; }
         .strip-label { width: 80px; font-size: 10px; font-weight: 900; color: #10b981; border-right: 1px solid #f1f5f9; }
-        .strip-grid { display: flex; flex: 1; gap: 15px; }
-        .f { display: flex; flex-direction: column; gap: 5px; flex: 1; }
-        .f label { font-size: 10px; font-weight: 800; color: #94a3b8; text-transform: uppercase; display: flex; align-items: center; gap: 4px; }
-        .f input, .f select, .toggle { height: 38px; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0 10px; font-size: 13px; font-weight: 600; outline: none; }
-        .toggle { display: flex; background: #f1f5f9; padding: 2px; height: 38px; border-radius: 6px; }
-        .toggle button { flex: 1; border: none; background: none; cursor: pointer; color: #94a3b8; display: flex; align-items: center; justify-content: center; }
+        
+        .strip-grid { 
+          display: flex; 
+          flex: 1; 
+          gap: 12px; 
+          flex-wrap: wrap; 
+          align-items: flex-end; 
+        }
+
+        .f { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 0; }
+        .f label { font-size: 10px; font-weight: 800; color: #94a3b8; text-transform: uppercase; display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+        
+        .ff-help-cursor { cursor: help; text-decoration: underline dotted #94a3b8; }
+
+        .f input, .f select, .toggle { 
+          height: 38px; 
+          border: 1px solid #e2e8f0; 
+          border-radius: 6px; 
+          padding: 0 10px; 
+          font-size: 13px; 
+          font-weight: 600; 
+          outline: none; 
+          width: 100%;
+          background: white;
+        }
+
+        .ff-input-compact { font-size: 12px !important; padding: 0 8px !important; }
+
+        .toggle { display: flex; background: #f1f5f9; padding: 2px; height: 38px; border-radius: 6px; width: auto; }
+        .toggle button { flex: 1; border: none; background: none; cursor: pointer; color: #94a3b8; display: flex; align-items: center; justify-content: center; padding: 0 10px; }
         .toggle button.active { background: white; color: #3b82f6; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        
         .table-h { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; font-weight: 800; text-transform: uppercase; font-size: 12px; }
         .a-table { width: 100%; border-collapse: collapse; }
         .a-table th { font-size: 10px; color: #94a3b8; padding: 10px; border-bottom: 2px solid #f8fafc; text-align: left; }
@@ -499,7 +663,56 @@ export default function AdminQuoteDetailPage() {
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .no-spin::-webkit-inner-spin-button, .no-spin::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 
-        /* --- HISTORIAL Y PAGINACIÓN --- */
+        /* CHATTER LOGÍSTICO ESTILOS */
+        .chatter-box { background: #f8fafc !important; border-left: 4px solid #3b82f6 !important; }
+        .chat-viewport { 
+          max-height: 400px; 
+          overflow-y: auto; 
+          display: flex; 
+          flex-direction: column; 
+          gap: 15px; 
+          padding: 15px;
+          background: white;
+          border-radius: 12px;
+          border: 1px solid #e2e8f0;
+          margin-bottom: 15px;
+        }
+        .empty-chat { text-align: center; color: #94a3b8; font-size: 13px; padding: 40px; }
+        .chat-bubble-wrapper { display: flex; width: 100%; }
+        .chat-bubble-wrapper.client { justify-content: flex-start; }
+        .chat-bubble-wrapper.admin { justify-content: flex-end; }
+        .chat-bubble { max-width: 75%; padding: 12px 16px; border-radius: 16px; position: relative; }
+        .client .chat-bubble { background: #f1f5f9; color: #1e293b; border-bottom-left-radius: 2px; }
+        .admin .chat-bubble { background: #3b82f6; color: white; border-bottom-right-radius: 2px; }
+        .bubble-meta { font-size: 9px; font-weight: 800; text-transform: uppercase; margin-bottom: 4px; opacity: 0.8; }
+        .bubble-text { font-size: 13px; font-weight: 500; line-height: 1.4; }
+        .chat-input-area { display: flex; gap: 10px; background: white; padding: 10px; border-radius: 12px; border: 1px solid #e2e8f0; }
+        .chat-input-area textarea { 
+          flex: 1; 
+          border: none; 
+          resize: none; 
+          height: 45px; 
+          font-family: inherit; 
+          font-size: 13px; 
+          outline: none; 
+        }
+        .btn-send { 
+          background: #3b82f6; 
+          color: white; 
+          border: none; 
+          width: 45px; 
+          height: 45px; 
+          border-radius: 10px; 
+          cursor: pointer; 
+          display: flex; 
+          align-items: center; 
+          justify-content: center;
+          transition: 0.2s;
+        }
+        .btn-send:hover:not(:disabled) { background: #2563eb; transform: scale(1.05); }
+        .btn-send:disabled { background: #cbd5e1; cursor: not-allowed; }
+
+        /* HISTORIAL */
         .log-list { display: flex; flex-direction: column; }
         .no-logs { padding: 20px; text-align: center; color: #94a3b8; font-size: 13px; }
         .log-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; background: #fff; border-bottom: 1px solid #f1f5f9; }

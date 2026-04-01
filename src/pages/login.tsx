@@ -49,9 +49,9 @@ export default function LoginPage() {
       const role = String(me.role || "").toLowerCase();
 
       if (role === "admin" || role === "superadmin") {
-        navigate("/admin/shipments");
+        navigate("/admin/dashboard");
       } else {
-        navigate("/shipments");
+        navigate("/clients/dashboard");
       }
       return true;
     } catch {

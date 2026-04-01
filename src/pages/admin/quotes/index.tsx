@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom"; 
 import { 
   PlusCircle, Search, Plane, Ship, 
-  CheckCircle, SortAsc, AlertCircle, TrendingUp, ChevronRight, X
+  CheckCircle, SortAsc, AlertCircle, TrendingUp, ChevronRight, X,
+  Calendar // 1. Añadido icono para la fecha
 } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
 import { getApiBase } from "../../../lib/apiBase";
@@ -27,6 +28,7 @@ type QuoteRow = {
     variety?: string;
     product?: string;
     customer_label?: string;
+    requested_shipment_date?: string; // Aseguramos el tipado
     [key: string]: any;
   }; 
   total?: number | null;
@@ -183,33 +185,24 @@ export default function AdminQuotesIndex() {
     items.map((r) => {
       const isRequest = r.status === 'Solicitud';
       
-      // --- NORMALIZACIÓN DE LÓGICA ---
       const getProductDisplay = () => {
-        // 1. Extraer el objeto de forma segura
         let details = r.product_details;
         if (typeof details === 'string') {
           try { details = JSON.parse(details); } catch { details = {}; }
         }
-
-        // 2. Extraer la variedad con prioridad absoluta
-        // En las Q/ según tu SQL es 'variety'. En RFQ/ suele ser 'customer_label'
         const variety = details?.variety || details?.customer_label || "";
-
-        // 3. Lógica de visualización: Si no hay variedad, es un error de data, 
-        // pero mostramos el producto base para no romper la UI.
         const base = "Piña";
-        if (!variety) return `${base} MD2 Golden`; // Default lógico para tu negocio
-        
-        // Evitar redundancia (No mostrar "Piña Piña MD2")
+        if (!variety) return `${base} MD2 Golden`; 
         return variety.toLowerCase().includes(base.toLowerCase()) 
           ? variety 
           : `${base} ${variety}`;
       };
 
       const productInfo = getProductDisplay();
-      
-      // Fix de Número: Prioridad al número generado, fallback al ID corto
       const displayId = r.quote_number || r.quote_no || `RFQ-${r.id.slice(0,5).toUpperCase()}`;
+
+      // --- EXTRACCIÓN DE FECHA ---
+      const shipmentDate = r.product_details?.requested_shipment_date;
 
       return (
         <div 
@@ -239,6 +232,14 @@ export default function AdminQuotesIndex() {
               <span className="flag">{getFlag(r.destination)}</span>
               <span className="dest-text">{r.destination}</span>
             </div>
+
+            {/* NUEVA SECCIÓN DE FECHA BAJO LA RUTA */}
+            {shipmentDate && (
+              <div className="ff-shipment-date-row">
+                <Calendar size={12} className="date-icon" />
+                <span>ETD: {new Date(shipmentDate).toLocaleDateString('es-PA', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+              </div>
+            )}
           </div>
 
           <div className="col-amount">
@@ -301,6 +302,13 @@ export default function AdminQuotesIndex() {
         .client-name { font-size: 14px; font-weight: 600; color: #334155; }
         .route-timeline { display: flex; align-items: center; gap: 8px; background: #f8fafc; padding: 4px 12px; border-radius: 50px; width: fit-content; border: 1px solid #f1f5f9; }
         .route-timeline .dest-text { font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; }
+
+        /* ESTILOS DE LA FECHA DE EMBARQUE */
+        .ff-shipment-date-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; }
+        .is-request-row .ff-shipment-date-row { color: #b91c1c; } /* Rojo en solicitudes */
+        .date-icon { color: #94a3b8; }
+        .is-request-row .date-icon { color: #ef4444; }
+
         .col-amount { text-align: right; padding-right: 20px; }
         .amount-val { font-size: 15px; font-weight: 500; color: #475569; }
         .pending-price { color: #ef4444; font-weight: 800; font-size: 11px; text-transform: uppercase; }

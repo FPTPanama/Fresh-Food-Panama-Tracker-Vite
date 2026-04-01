@@ -1,14 +1,15 @@
-// src/pages/clients/quotes/[id].tsx
-import { useEffect, useMemo, useState } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom"; 
+import { useEffect, useState } from "react";
+import { useParams, useNavigate } from "react-router-dom"; 
 import { 
   FileText, Loader2, Plane, Ship, 
-  MapPin, Shield, ArrowRight, Package,
-  CheckCircle, Download, ExternalLink, Info, AlertCircle
+  MapPin, Shield, ArrowRight, CheckCircle, 
+  Download, ExternalLink, Info, AlertCircle, MessageSquare
 } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
 import { getApiBase } from "../../../lib/apiBase";
 import { ClientLayout } from "../../../components/ClientLayout";
+// ✅ Importación corregida según el árbol de archivos (id -> quotes -> clients -> pages -> components)
+import { QuoteChatter } from "../../../components/QuoteChatter";
 
 export default function ClientQuoteDetailPage() {
   const { id } = useParams(); 
@@ -17,12 +18,16 @@ export default function ClientQuoteDetailPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [data, setData] = useState<any>(null);
+  const [user, setUser] = useState<any>(null);
 
   const loadData = async () => {
     if (!id) return;
     setLoading(true);
     try {
-      // CORRECCIÓN CLAVE: Usamos la sintaxis explícita !client_id para evitar el error 406
+      // Obtenemos sesión para el Chatter
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) setUser(session.user);
+
       const { data: quote, error } = await supabase
         .from("quotes")
         .select(`
@@ -36,16 +41,12 @@ export default function ClientQuoteDetailPage() {
         .eq("id", id)
         .single();
 
-      if (error) {
-        console.error("Error Supabase:", error);
-        throw error;
-      }
-      
+      if (error) throw error;
       if (!quote) throw new Error("No encontrado");
+      
       setData(quote);
     } catch (err) { 
       console.error("Error en loadData:", err); 
-      // navigate("/clients/quotes"); // Comentado temporalmente para que puedas ver el error en consola si persiste
     } finally { 
       setLoading(false); 
     }
@@ -84,12 +85,25 @@ export default function ClientQuoteDetailPage() {
     window.open(`${getApiBase()}/.netlify/functions/${fn}?id=${id}`, '_blank');
   };
 
+  const scrollToChat = () => {
+    const hub = document.getElementById('communication-hub');
+    if (hub) {
+      hub.scrollIntoView({ behavior: 'smooth' });
+      setTimeout(() => {
+        hub.querySelector('textarea')?.focus();
+      }, 600);
+    }
+  };
+
   if (loading) return <ClientLayout title="Cargando..."><div className="p-20 text-center"><Loader2 className="spin mx-auto text-emerald-600" size={40} /></div></ClientLayout>;
   if (!data) return <ClientLayout title="Error"> <div className="p-20 text-center"><AlertCircle className="mx-auto text-red-500" size={40}/> <p>No se pudo cargar la información.</p></div></ClientLayout>;
 
   const isApproved = data.status === 'approved';
   const isSent = data.status === 'sent';
   const displayId = data.quote_number || data.quote_no || "RFQ-PENDIENTE";
+  
+  // Lógica de total consistente con el Admin
+  const finalTotal = data.totals?.total || data.total || 0;
 
   return (
     <ClientLayout title={`Expediente: ${displayId}`}>
@@ -105,6 +119,11 @@ export default function ClientQuoteDetailPage() {
             </div>
           </div>
           <div className="banner-btns">
+            {!isApproved && (
+              <button onClick={scrollToChat} className="btn-ghost">
+                <MessageSquare size={16} /> Solicitar Cambio
+              </button>
+            )}
             <button onClick={() => handleDownload('quote')} className="btn-ghost">
               <ExternalLink size={16} /> Ver Cotización
             </button>
@@ -135,7 +154,7 @@ export default function ClientQuoteDetailPage() {
           </div>
           <div className="heroRight">
             <div className="kpi-box">
-              <span className="kpi-val">USD {(data.total_amount || data.total || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              <span className="kpi-val">USD {finalTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
               <span className="kpi-lab">MONTO TOTAL DE OPERACIÓN</span>
             </div>
             <div className="pills-row">
@@ -174,10 +193,19 @@ export default function ClientQuoteDetailPage() {
           </div>
         </div>
 
+        {/* CHATTER DE COMUNICACIÓN */}
+        <div id="communication-hub">
+           <QuoteChatter 
+             quoteId={id!} 
+             currentUserRole="client" 
+             currentUserId={user?.id} 
+           />
+        </div>
+
       </div>
 
       <style>{`
-        .ff-container { padding: 30px; max-width: 1200px; margin: 0 auto; font-family: 'Inter', sans-serif; }
+        .ff-container { padding: 30px; max-width: 1200px; margin: 0 auto; font-family: 'Inter', sans-serif; padding-bottom: 100px; }
         .ff-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; margin-bottom: 20px; }
         
         .hero { display: flex; justify-content: space-between; align-items: center; background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 25px; margin-bottom: 20px; }
@@ -216,7 +244,7 @@ export default function ClientQuoteDetailPage() {
         .f-item label { display: block; font-size: 10px; font-weight: 800; color: #94a3b8; text-transform: uppercase; margin-bottom: 4px; }
         .f-item span { font-size: 14px; font-weight: 700; color: #1e293b; display: flex; align-items: center; gap: 6px; }
 
-        .terms-card { border-top: 4px solid #f59e0b; }
+        .terms-card { border-top: 4px solid #f59e0b; margin-bottom: 40px; }
         .table-h { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 14px; color: #b45309; margin-bottom: 15px; }
         .terms-viewer { font-size: 14px; color: #475569; line-height: 1.7; white-space: pre-line; background: #fffbeb; padding: 20px; border-radius: 12px; border: 1px solid #fef3c7; }
         
@@ -226,6 +254,11 @@ export default function ClientQuoteDetailPage() {
         
         .spin { animation: spin 1s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+        #communication-hub {
+            border-top: 1px solid #e2e8f0;
+            padding-top: 20px;
+        }
       `}</style>
     </ClientLayout>
   );
