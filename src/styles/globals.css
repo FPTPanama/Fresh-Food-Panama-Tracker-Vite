@@ -1,46 +1,64 @@
 /* =========================================
    Fresh Food Panamá Tracker
    GLOBAL UI – BRAND PERFECT SAAS GRADE 🍍
+   OPTIMIZADO PARA PRODUCCIÓN v1.1
 ========================================= */
 
-/* NOTA: El @import de fuentes se movió a index.html para mejorar el LCP */
+/* REORDENAMIENTO: El @import se eliminó para evitar bloqueo de renderizado.
+   Las fuentes Poppins ahora cargan desde el <head> de index.html 
+*/
 
 :root {
+  /* Brand - Colores Corporativos */
   --ff-green: #227432;
   --ff-green-dark: #224C22;
   --ff-orange: #D17711;
   --ff-fresh: #e6efe2;
+
+  /* Surfaces & Backgrounds */
   --ff-bg: var(--ff-fresh);  
   --ff-surface: #ffffff;     
   --ff-surface-hover: #f9fbf9;
+
+  /* Alertas Dinámicas (Premium Gold & Red) */
   --ff-highlight-bg: #fffbeb;
   --ff-highlight-border: #fde68a;
   --ff-highlight-text: #92400e;
   --ff-pulse-red: #ef4444;
-  --ff-text: #111827;
-  --ff-muted: #6b7280;
+
+  /* Text Colors - AJUSTE DE CONTRASTE AA */
+  --ff-text: #0f172a;       /* Negro azulado más profundo */
+  --ff-muted: #475569;      /* Gris pizarra oscuro (Contraste 4.5:1 verificado) */
   --ff-side-text: rgba(255, 255, 255, 0.95);
-  --ff-side-text-muted: rgba(255, 255, 255, 0.7);
+  --ff-side-text-muted: rgba(255, 255, 255, 0.75);
+
+  /* Borders & Shadows */
   --ff-border: rgba(34, 76, 34, 0.12);
-  --ff-border-light: rgba(34, 76, 34, 0.06);
-  --ff-shadow-sm: 0 1px 3px 0 rgba(34, 76, 34, 0.08), 0 1px 2px -1px rgba(34, 76, 34, 0.05);
-  --ff-shadow-md: 0 4px 6px -1px rgba(34, 76, 34, 0.08), 0 2px 4px -2px rgba(34, 76, 34, 0.05);
+  --ff-border-light: rgba(34, 76, 34, 0.08);
+  --ff-shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+  --ff-shadow-md: 0 4px 6px -1px rgba(34, 76, 34, 0.1);
   --ff-shadow-glow: 0 4px 14px rgba(253, 230, 138, 0.4);
+
+  /* Radius */
   --ff-radius-sm: 6px;
   --ff-radius: 10px;
   --ff-radius-lg: 16px;
   --ff-radius-pill: 9999px;
+
+  /* Font sizes */
   --ff-fs-0: 12px;
   --ff-fs-1: 13.5px;
   --ff-fs-2: 14.5px;
   --ff-fs-3: 16.5px;
-  --ff-header-h: 85px;
-  --ff-sidebar-w: 260px;
+
+  /* Layout dimensions */
+  --ff-header-h: 80px;
+  --ff-sidebar-w: 240px;
   --ff-sidebar-w-collapsed: 68px;
 }
 
 /* -------------------------------
-   Reset / Base / Universal Font
+   Reset & Base Performance
 -------------------------------- */
 * {
   box-sizing: border-box;
@@ -49,9 +67,10 @@
 html, body {
   height: 100%;
   margin: 0;
+  scroll-behavior: smooth;
 }
 
-/* Aplicamos la fuente de forma eficiente sin romper iconos */
+/* Aplicación de fuente optimizada para evitar parpadeos (FCP) */
 body, input, button, select, textarea {
   font-family: 'Poppins', sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -63,127 +82,77 @@ body {
   background-color: var(--ff-bg) !important;
   color: var(--ff-text);
   font-size: var(--ff-fs-1);
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
-a {
-  color: inherit;
-  text-decoration: none;
-}
-
-/* APP GRID */
+/* -------------------------------
+   APP GRID & NAVIGATION
+-------------------------------- */
 .ff-app {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: var(--ff-sidebar-w) minmax(0, 1fr);
-  grid-template-rows: var(--ff-header-h) minmax(0, 1fr);
+  grid-template-columns: var(--ff-sidebar-w) 1fr;
+  grid-template-rows: var(--ff-header-h) 1fr;
   grid-template-areas:
-    "top top"
+    "side top"
     "side main";
-}
-
-.ff-app.is-collapsed {
-  grid-template-columns: var(--ff-sidebar-w-collapsed) minmax(0, 1fr);
 }
 
 /* Header (TOP) */
 .ff-top {
   grid-area: top;
   background: transparent !important;
-  border-bottom: none !important;
+  border: none !important;
   box-shadow: none !important;
-  height: var(--ff-header-h);
   display: flex;
   align-items: center;
-  padding: 0 30px;
+  padding: 0 32px;
   z-index: 100;
 }
 
-.ff-top__inner { width: 100%; display: flex; justify-content: space-between; align-items: center; }
-.ff-top__left { display: flex; align-items: center; gap: 24px; flex-shrink: 0; }
-
-.ff-top__logo {
-  height: 48px;
-  width: auto;
-  max-width: 165px;
-  display: block;
-  object-fit: contain;
-  cursor: pointer;
-  transition: transform 0.2s ease;
-}
-.ff-top__logo:hover { transform: scale(1.02); }
-
-.ff-top__titleWrap { display: flex; flex-direction: column; justify-content: center; }
-.ff-top__title { 
-  font-weight: 800; 
-  font-size: 24px; 
-  color: var(--ff-green-dark) !important; 
-  line-height: 1.1;
-  letter-spacing: -0.5px;
-  margin: 0;
-}
-
-.ff-top__sub { 
-  margin-top: 4px; 
-  font-size: 13px; 
-  color: var(--ff-green-dark); 
-  opacity: 0.8; 
-  font-weight: 500;
-}
-.ff-top__right { display: flex; align-items: center; gap: 15px; flex-shrink: 0; margin-left: auto; }
-
-/* Sidebar */
+/* Sidebar Branding Deep Green */
 .ff-side {
-  background-color: #224C22 !important;
-  opacity: 1 !important;
+  grid-area: side;
+  background-color: var(--ff-green-dark) !important;
+  display: flex;
+  flex-direction: column;
+  z-index: 110;
+  box-shadow: 4px 0 20px rgba(0, 0, 0, 0.05);
 }
-
-.ff-side__nav { padding: 0 15px; display: flex; flex-direction: column; gap: 4px; }
 
 .ff-side__item {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 16px;
+  padding: 12px 16px;
   border-radius: var(--ff-radius);
   color: var(--ff-side-text-muted) !important;
   font-weight: 500;
-  font-size: 14px;
   transition: all 0.2s ease;
-  position: relative;
+  text-decoration: none;
 }
 
 .ff-side__item:hover {
-  background-color: rgba(255, 255, 255, 0.08);
+  background-color: rgba(255, 255, 255, 0.05);
   color: #ffffff !important;
 }
 
 .ff-side__item.is-active {
-  background-color: rgba(255, 255, 255, 0.15);
+  background-color: rgba(255, 255, 255, 0.1);
   color: #ffffff !important;
-  font-weight: 600;
+  font-weight: 700;
 }
 
-.ff-side__item.is-active::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 25%;
-  height: 50%;
-  width: 4px;
-  background-color: var(--ff-orange);
-  border-radius: 0 4px 4px 0;
-}
+/* -------------------------------
+   COMPONENTS (Cards & Rows)
+-------------------------------- */
+.ff-main { grid-area: main; padding: 0 32px 32px; overflow-y: auto; }
+.ff-content { max-width: 1600px; margin: 0 auto; width: 100%; }
 
-/* Main content */
-.ff-main { grid-area: main; overflow: auto; min-width: 0; }
-.ff-content { padding: 24px; width: 100%; min-width: 0; max-width: 1280px; margin: 0 auto; }
-
-/* Cards & List Rows */
-.ff-card, .ff-card2, .ff-panel, .metric-card {
+.ff-card, .ff-panel, .metric-card {
   background: var(--ff-surface) !important;
   border: 1px solid var(--ff-border) !important;
-  border-radius: var(--ff-radius) !important;
+  border-radius: var(--ff-radius-lg) !important;
   box-shadow: var(--ff-shadow-sm) !important;
 }
 
@@ -191,18 +160,44 @@ a {
   background: #ffffff;
   border: 1px solid var(--ff-border-light) !important;
   border-radius: 8px !important;
-  transition: all 0.2s ease;
+  transition: 0.2s;
 }
 
-/* Alertas Dinámicas */
-.alert-pill.pulse-red, .hub-pill.urgent {
-  background-color: var(--ff-highlight-bg) !important;
-  border-color: var(--ff-highlight-border) !important;
-  color: var(--ff-highlight-text) !important;
-  box-shadow: var(--ff-shadow-glow) !important;
+.ff-list-row:hover {
+  border-color: var(--ff-green) !important;
+  transform: translateY(-1px);
 }
 
-/* Dot Pulse */
+/* -------------------------------
+   ACCESSIBILITY OVERRIDES (The Master Fix)
+-------------------------------- */
+
+/* Etiquetas pequeñas sobre fondos claros (Lighthouse Contrast Fix) */
+.s-lab, 
+.ch-sub, 
+.field label, 
+.nav-item:not(.active),
+.dr-header span,
+.res-sub {
+  color: var(--ff-muted) !important;
+  font-weight: 600 !important; /* Grosor para mejorar legibilidad */
+  letter-spacing: 0.02em;
+}
+
+/* El texto de las unidades dentro de los valores (Kg, Lbs) */
+.stat-block .s-val small {
+  color: #334155 !important;
+  font-weight: 500;
+}
+
+/* Inputs con contraste mejorado */
+.ff-input::placeholder, input::placeholder {
+  color: #94a3b8;
+}
+
+/* -------------------------------
+   ANIMATIONS & FEEDBACK
+-------------------------------- */
 .dot-pulse {
   position: absolute;
   top: -4px; right: -4px;
@@ -211,6 +206,7 @@ a {
   background-color: var(--ff-pulse-red);
   border: 2px solid #fff;
 }
+
 .dot-pulse::after {
   content: ''; position: absolute; inset: -2px;
   border-radius: 50%;
@@ -224,7 +220,7 @@ a {
   100% { transform: scale(2.5); opacity: 0; }
 }
 
-/* Loader */
+/* Global Loader */
 .ff-loader-full {
   height: 100vh;
   display: flex;
@@ -233,8 +229,8 @@ a {
   background: var(--ff-bg);
 }
 
-/* Scrollbar */
+/* Scrollbar SaaS Style */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(34, 116, 50, 0.15); border-radius: 10px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(34, 116, 50, 0.3); }
+::-webkit-scrollbar-thumb { background: rgba(34, 116, 50, 0.2); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: var(--ff-green); }
