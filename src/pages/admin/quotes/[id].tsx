@@ -4,7 +4,7 @@ import {
   Save, FileText, Loader2, Plane, Ship, 
   Thermometer, Droplets, Calculator, MapPin, Shield, ArrowRight, Package,
   Maximize, AlertCircle, TrendingDown, ChevronLeft, ChevronRight,
-  Calendar, MessageSquare 
+  Calendar, MessageSquare, Clock
 } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
 import { getApiBase } from "../../../lib/apiBase";
@@ -16,17 +16,43 @@ import { LocationSelector } from "../../../components/LocationSelector";
 const GLOBAL_MARGIN_THRESHOLD = 10.0; 
 const LOGS_PER_PAGE = 5; 
 
+// FIX: Diccionario expandido con TODOS los campos posibles de la cotización
 const FIELD_LABELS: { [key: string]: string } = {
   boxes: "Cajas",
   weight_kg: "Peso (Kg)",
+  origin: "Origen",
   destination: "Destino",
   status: "Estado",
-  total: "Total Cotización",
-  mode: "Modo",
-  terms: "Términos",
-  product_id: "Producto",
+  total: "Venta Total",
+  mode: "Vía de Transporte",
+  terms: "Términos y Condiciones",
+  product_id: "ID Producto",
+  product_details: "Especificaciones",
+  pallets: "Pallets",
+  incoterm: "Incoterm",
+  variety: "Variedad",
+  color: "Color",
+  brix: "Brix",
+  caliber: "Calibre",
+  requested_shipment_date: "ETD (Salida)",
+  c_fruit: "Costo Fruta", s_fruit: "Venta Fruta",
+  c_freight: "Costo Flete", s_freight: "Venta Flete",
+  c_origin: "Costo Origen", s_origin: "Venta Origen",
+  c_aduana: "Costo Aduana", s_aduana: "Venta Aduana",
+  c_insp: "Costo Inspección", s_insp: "Venta Inspección",
+  c_itbms: "Costo ITBMS", s_itbms: "Venta ITBMS",
+  c_handling: "Costo Handling", s_handling: "Venta Handling",
+  c_other: "Otros Costos", s_other: "Otras Ventas",
   costs: "Costos/Precios",
-  product_details: "Especificaciones"
+  totals: "Totales"
+};
+
+// Función robusta para formatear valores en el historial
+const formatChangeVal = (val: any, isDocs: boolean = false) => {
+  if (isDocs) return "Documento Modificado";
+  if (val === null || val === undefined || val === '') return "Vacío";
+  if (typeof val === 'object') return "Dato Actualizado"; 
+  return String(val);
 };
 
 const statusBadgeClass = (status: string | undefined) => {
@@ -51,6 +77,22 @@ const DEFAULT_TERMS = `• Validez de la oferta: 5 días hábiles.
 interface CostLine { base: number; unitSale: number; label: string; tip: string; }
 interface CostState { [key: string]: CostLine; }
 
+// --- HELPER TOOLTIP DE LOCACIÓN ---
+const LocationTooltip = ({ code, locMap, children }: { code: string, locMap: Record<string, any>, children: React.ReactNode }) => {
+  const locInfo = locMap[code?.toUpperCase()];
+  const displayName = locInfo ? `${locInfo.name}${locInfo.country ? `, ${locInfo.country}` : ''}` : 'Locación Desconocida';
+  
+  return (
+    <div className="ff-tooltip-wrapper">
+      {children}
+      <div className="ff-tooltip-content loc-tooltip">
+        <strong>{code || 'N/A'}</strong>
+        <span>{displayName}</span>
+      </div>
+    </div>
+  );
+};
+
 export default function AdminQuoteDetailPage() {
   const { id } = useParams(); 
   const navigate = useNavigate();
@@ -63,6 +105,7 @@ export default function AdminQuoteDetailPage() {
   const [products, setProducts] = useState<any[]>([]);
   const [varieties, setVarieties] = useState<string[]>([]);
   const [logs, setLogs] = useState<any[]>([]); 
+  const [locationsMap, setLocationsMap] = useState<Record<string, any>>({});
   
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -77,6 +120,7 @@ export default function AdminQuoteDetailPage() {
   const [pallets, setPallets] = useState(0);
   const [mode, setMode] = useState<"AIR" | "SEA">("AIR");
   const [incoterm, setIncoterm] = useState("CIP");
+  const [origin, setOrigin] = useState("PTY"); 
   const [place, setPlace] = useState("");
   const [productId, setProductId] = useState("");
   const [variety, setVariety] = useState("");
@@ -86,10 +130,12 @@ export default function AdminQuoteDetailPage() {
   const [shipmentDate, setShipmentDate] = useState(""); 
   const [termsConditions, setTermsConditions] = useState(DEFAULT_TERMS);
 
+  const isReadOnly = useMemo(() => status?.toLowerCase() === 'approved', [status]);
+
   const [costs, setCosts] = useState<CostState>({
     fruta: { base: 13.30, unitSale: 0, label: "Fruta (Base Cajas)", tip: "Precio de compra por caja." },
     flete: { base: 0, unitSale: 0, label: "Flete Internacional", tip: "Costo por Kg estimado." },
-    origen: { base: 0, unitSale: 0, label: "Gastos de Origen", tip: "Transporte interno y manejo PA." },
+    origen: { base: 0, unitSale: 0, label: "Gastos de Origen", tip: "Transporte interno y manejo." },
     aduana: { base: 0, unitSale: 0, label: "Gestión Aduanera", tip: "Corredor y trámites." },
     inspeccion: { base: 0, unitSale: 0, label: "Inspecciones / Fiton", tip: "Costo fijo MIDA." },
     itbms: { base: 0, unitSale: 0, label: "ITBMS / Tasas", tip: "Impuestos aplicables." },
@@ -133,6 +179,18 @@ export default function AdminQuoteDetailPage() {
   }, [logs, currentPage]);
 
   const totalPages = Math.ceil(logs.length / LOGS_PER_PAGE);
+
+  useEffect(() => {
+    async function fetchLocations() {
+      const { data } = await supabase.from('master_locations').select('code, name, country');
+      if (data) {
+        const map: Record<string, any> = {};
+        data.forEach(loc => { map[loc.code.toUpperCase()] = loc; });
+        setLocationsMap(map);
+      }
+    }
+    fetchLocations();
+  }, []);
 
   const loadLogs = useCallback(async () => {
     if (!id) return;
@@ -180,6 +238,7 @@ export default function AdminQuoteDetailPage() {
         setBoxes(Number(q.boxes || 0));
         setWeightKg(Number(q.weight_kg || 0));
         setMode(q.mode || "AIR");
+        setOrigin(q.origin || "PTY"); 
         setPlace(q.destination || "");
         setProductId(q.product_id || "");
         setTermsConditions(q.terms || DEFAULT_TERMS);
@@ -228,6 +287,7 @@ export default function AdminQuoteDetailPage() {
   }, [authOk, id, loadData]);
 
   const updateCostLine = (key: string, field: 'base' | 'unitSale', value: string) => {
+    if (isReadOnly) return;
     const numValue = value === "" ? 0 : parseFloat(value);
     setCosts((prev) => ({ ...prev, [key]: { ...prev[key], [field]: numValue } }));
   };
@@ -274,8 +334,12 @@ export default function AdminQuoteDetailPage() {
       const payload = {
         id,
         total: totalVentaCientifico, 
-        status, mode, destination: place,
-        boxes: Number(boxes), weight_kg: Number(weightKg),
+        status, 
+        mode, 
+        origin, 
+        destination: place,
+        boxes: Number(boxes), 
+        weight_kg: Number(weightKg),
         terms: termsConditions,
         costs: {
           c_fruit: Number(costs.fruta.base), s_fruit: Number(costs.fruta.unitSale),
@@ -307,8 +371,43 @@ export default function AdminQuoteDetailPage() {
       });
 
       if (!response.ok) throw new Error("Error Servidor");
+
+      if (status.toLowerCase() === 'approved') {
+        const { data: existingShip } = await supabase
+          .from('shipments')
+          .select('id')
+          .eq('quote_id', id)
+          .maybeSingle();
+
+        if (!existingShip) {
+          const selectedProd = products.find(p => p.id === productId);
+          const { error: shipError } = await supabase
+            .from('shipments')
+            .insert({
+              quote_id: id,
+              client_id: data.client_id || data.clients?.id,
+              boxes: Number(boxes),
+              pallets: Number(pallets),
+              weight_kg: Number(weightKg),
+              product_name: selectedProd?.name || "Fruta",
+              product_variety: variety,
+              product_mode: mode,
+              caliber: caliber,
+              color: color,
+              brix_grade: brix,
+              origin: origin, 
+              destination: place,
+              incoterm: incoterm,
+              status: 'CREATED',
+              code: `SHP-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`
+            });
+          
+          if (shipError) console.error("Error al crear embarque:", shipError);
+          else setToast("Aprobada y Embarque Generado");
+        }
+      }
       
-      setToast("Sincronizado");
+      if (!toast) setToast("Sincronizado");
       await loadData(); 
       setTimeout(() => setToast(null), 3000);
     } catch (err) { setToast("Error"); } finally { setBusy(false); }
@@ -321,6 +420,7 @@ export default function AdminQuoteDetailPage() {
   };
 
   const handleProductChange = (val: string) => {
+    if (isReadOnly) return;
     setProductId(val);
     const selectedProd = products.find(p => p.id === val);
     setVarieties(selectedProd?.variety ? (Array.isArray(selectedProd.variety) ? selectedProd.variety : [selectedProd.variety]) : []);
@@ -358,14 +458,30 @@ export default function AdminQuoteDetailPage() {
                 <span className="kpi-lab">PRECIO POR CAJA</span>
               </div>
               <button onClick={handlePrintPdf} className="pdf-link"><FileText size={18}/> PDF</button>
-              <button className={`btn-save ${analysis.isRisk ? 'btn-danger' : ''}`} onClick={handleSave} disabled={busy}>
+              <button className={`btn-save ${analysis.isRisk ? 'btn-danger' : ''}`} onClick={handleSave} disabled={busy || (isReadOnly && data?.status === 'approved')}>
                 {busy ? <Loader2 size={18} className="spin"/> : <Save size={18}/>} 
-                {busy ? 'Guardando...' : 'Guardar'}
+                {busy ? 'Guardando...' : isReadOnly ? 'Cotización Aprobada' : 'Guardar'}
               </button>
             </div>
-            <span className="pill green"><MapPin size={14}/> PTY <ArrowRight size={12}/> {place || 'Destino'}</span>
+            
+            <span className="pill green">
+              <MapPin size={14}/> 
+              <LocationTooltip code={origin || 'PTY'} locMap={locationsMap}>
+                <span style={{ cursor: 'help' }}>{origin || 'PTY'}</span>
+              </LocationTooltip>
+              <ArrowRight size={12}/> 
+              <LocationTooltip code={place || 'TBD'} locMap={locationsMap}>
+                <span style={{ cursor: 'help' }}>{place || 'Destino'}</span>
+              </LocationTooltip>
+            </span>
+            
             <span className="pill blue"><Shield size={14}/> {incoterm}</span>
-            <select className={statusBadgeClass(status)} value={status} onChange={(e) => setStatus(e.target.value)}>
+            <select 
+              className={statusBadgeClass(status)} 
+              value={status} 
+              onChange={(e) => setStatus(e.target.value)}
+              disabled={isReadOnly && data?.status === 'approved'}
+            >
               <option value="Solicitud">Nueva Solicitud</option>
               <option value="draft">Borrador</option>
               <option value="sent">Enviada</option>
@@ -379,11 +495,11 @@ export default function AdminQuoteDetailPage() {
         <div className="ff-card strip">
           <div className="strip-label">CALIDAD</div>
           <div className="strip-grid">
-            <div className="f"><label>Producto</label><select value={productId} onChange={e => handleProductChange(e.target.value)}><option value="">Seleccionar...</option>{products.map(p => (<option key={p.id} value={p.id}>{p.name}</option>))}</select></div>
-            <div className="f"><label>Variedad</label><select value={variety} onChange={e => setVariety(e.target.value)}><option value="">Seleccionar...</option>{varieties.map((v, i) => (<option key={i} value={v}>{v}</option>))}</select></div>
-            <div className="f"><label><Maximize size={10}/> Calibre</label><input value={caliber} onChange={e => setCaliber(e.target.value)} placeholder="Ej: 5-6" /></div>
-            <div className="f"><label><Thermometer size={10}/> Color</label><input value={color} onChange={e => setColor(e.target.value)} placeholder="Ej: 2.5 - 3" /></div>
-            <div className="f"><label><Droplets size={10}/> Brix</label><input value={brix} onChange={e => setBrix(e.target.value)} placeholder="Ej: > 13" /></div>
+            <div className="f"><label>Producto</label><select disabled={isReadOnly} value={productId} onChange={e => handleProductChange(e.target.value)}><option value="">Seleccionar...</option>{products.map(p => (<option key={p.id} value={p.id}>{p.name}</option>))}</select></div>
+            <div className="f"><label>Variedad</label><select disabled={isReadOnly} value={variety} onChange={e => setVariety(e.target.value)}><option value="">Seleccionar...</option>{varieties.map((v, i) => (<option key={i} value={v}>{v}</option>))}</select></div>
+            <div className="f"><label><Maximize size={10}/> Calibre</label><input disabled={isReadOnly} value={caliber} onChange={e => setCaliber(e.target.value)} placeholder="Ej: 5-6" /></div>
+            <div className="f"><label><Thermometer size={10}/> Color</label><input disabled={isReadOnly} value={color} onChange={e => setColor(e.target.value)} placeholder="Ej: 2.5 - 3" /></div>
+            <div className="f"><label><Droplets size={10}/> Brix</label><input disabled={isReadOnly} value={brix} onChange={e => setBrix(e.target.value)} placeholder="Ej: > 13" /></div>
           </div>
         </div>
 
@@ -393,27 +509,39 @@ export default function AdminQuoteDetailPage() {
           <div className="strip-grid">
             <div className="f" style={{ flex: "0 0 85px" }}>
               <label>Modo</label>
-              <div className="toggle">
-                <button className={mode === 'AIR' ? 'active' : ''} onClick={() => setMode('AIR')}><Plane size={14} /></button>
-                <button className={mode === 'SEA' ? 'active' : ''} onClick={() => setMode('SEA')}><Ship size={14} /></button>
+              <div className={`toggle ${isReadOnly ? 'readonly' : ''}`}>
+                <button className={mode === 'AIR' ? 'active' : ''} onClick={() => !isReadOnly && setMode('AIR')}><Plane size={14} /></button>
+                <button className={mode === 'SEA' ? 'active' : ''} onClick={() => !isReadOnly && setMode('SEA')}><Ship size={14} /></button>
               </div>
             </div>
 
             <div className="f" style={{ flex: "0 0 90px" }}>
               <label>Incoterm</label>
-              <select value={incoterm} onChange={e => setIncoterm(e.target.value)}>
+              <select disabled={isReadOnly} value={incoterm} onChange={e => setIncoterm(e.target.value)}>
                 <option value="EXW">EXW</option><option value="FOB">FOB</option><option value="CIP">CIP</option><option value="CIF">CIF</option><option value="DDP">DDP</option>
               </select>
             </div>
 
-            <div className="f" style={{ flex: "1", minWidth: "180px" }}>
+            <div className="f" style={{ flex: "1", minWidth: "120px" }}>
+              <label>Origen</label>
+              {isReadOnly 
+                ? <LocationTooltip code={origin} locMap={locationsMap}><input disabled value={origin} className="tooltip-trigger-input" /></LocationTooltip> 
+                : <LocationTooltip code={origin} locMap={locationsMap}><LocationSelector mode={mode} value={origin} onChange={setOrigin} /></LocationTooltip>
+              }
+            </div>
+
+            <div className="f" style={{ flex: "1", minWidth: "120px" }}>
               <label>Destino</label>
-              <LocationSelector mode={mode} value={place} onChange={setPlace} />
+              {isReadOnly 
+                ? <LocationTooltip code={place} locMap={locationsMap}><input disabled value={place} className="tooltip-trigger-input" /></LocationTooltip> 
+                : <LocationTooltip code={place} locMap={locationsMap}><LocationSelector mode={mode} value={place} onChange={setPlace} /></LocationTooltip>
+              }
             </div>
             
-            <div className="f" style={{ flex: "0 0 130px" }} title="Fecha estimada de embarque (Estimated Time of Departure)">
+            <div className="f" style={{ flex: "0 0 120px" }} title="Fecha estimada de embarque (Estimated Time of Departure)">
               <label className="ff-help-cursor"><Calendar size={10} /> ETD</label>
               <input 
+                disabled={isReadOnly}
                 type="date" 
                 value={shipmentDate} 
                 onChange={e => setShipmentDate(e.target.value)} 
@@ -421,19 +549,19 @@ export default function AdminQuoteDetailPage() {
               />
             </div>
 
-            <div className="f" style={{ flex: "0 0 80px" }}>
+            <div className="f" style={{ flex: "0 0 70px" }}>
               <label>Cajas</label>
-              <input type="number" className="no-spin" value={boxes} onChange={e => setBoxes(Number(e.target.value))} />
+              <input disabled={isReadOnly} type="number" className="no-spin" value={boxes} onChange={e => setBoxes(Number(e.target.value))} />
+            </div>
+
+            <div className="f" style={{ flex: "0 0 70px" }}>
+              <label>Pallets</label>
+              <input disabled={isReadOnly} type="number" className="no-spin" value={pallets} onChange={e => setPallets(Number(e.target.value))} />
             </div>
 
             <div className="f" style={{ flex: "0 0 80px" }}>
-              <label>Pallets</label>
-              <input type="number" className="no-spin" value={pallets} onChange={e => setPallets(Number(e.target.value))} />
-            </div>
-
-            <div className="f" style={{ flex: "0 0 90px" }}>
               <label>Peso (Kg)</label>
-              <input type="number" className="no-spin" value={weightKg} onChange={e => setWeightKg(Number(e.target.value))} />
+              <input disabled={isReadOnly} type="number" className="no-spin" value={weightKg} onChange={e => setWeightKg(Number(e.target.value))} />
             </div>
           </div>
         </div>
@@ -447,9 +575,9 @@ export default function AdminQuoteDetailPage() {
               {analysis.lines.map(l => (
                 <tr key={l.key}>
                   <td><div className="c-box"><b>{l.label}</b><span>{l.tip}</span></div></td>
-                  <td align="right"><input className="in no-spin" type="number" step="any" value={costs[l.key].base || ""} onChange={e => updateCostLine(l.key, 'base', e.target.value)} /></td>
+                  <td align="right"><input disabled={isReadOnly} className="in no-spin" type="number" step="any" value={costs[l.key].base || ""} onChange={e => updateCostLine(l.key, 'base', e.target.value)} /></td>
                   <td align="center" style={{fontWeight: 800, color: '#64748b'}}>{l.qty}</td>
-                  <td align="right"><input className="in s no-spin" type="number" step="any" value={costs[l.key].unitSale || ""} onChange={e => updateCostLine(l.key, 'unitSale', e.target.value)} /></td>
+                  <td align="right"><input disabled={isReadOnly} className="in s no-spin" type="number" step="any" value={costs[l.key].unitSale || ""} onChange={e => updateCostLine(l.key, 'unitSale', e.target.value)} /></td>
                   <td align="right" style={{fontWeight: 700}}>${l.totalSaleRow.toLocaleString(undefined, {minimumFractionDigits:2})}</td>
                   <td align="center"><span className="m-badge">{l.margin}%</span></td>
                 </tr>
@@ -469,7 +597,7 @@ export default function AdminQuoteDetailPage() {
 
         <div className="ff-card" style={{ borderLeft: '4px solid #f59e0b' }}>
           <div className="table-h" style={{ color: '#b45309' }}><AlertCircle size={18}/> <span>Términos Contractuales</span></div>
-          <textarea className="terms-editor" value={termsConditions} onChange={(e) => setTermsConditions(e.target.value)} />
+          <textarea disabled={isReadOnly} className="terms-editor" value={termsConditions} onChange={(e) => setTermsConditions(e.target.value)} />
         </div>
 
         {/* --- CHATTER LOGÍSTICO --- */}
@@ -512,63 +640,53 @@ export default function AdminQuoteDetailPage() {
           </div>
         </div>
 
-        {/* --- HISTORIAL CON PAGINACIÓN --- */}
+        {/* --- HISTORIAL DE ACTIVIDAD (REDISEÑO PLANO ODOO) --- */}
         <div className="ff-card">
-          <div className="table-h"><Package size={18} color="#64748b"/> <span>Historial de Actividad</span></div>
-          <div className="log-list">
+          <div className="table-h"><Clock size={18} color="#64748b"/> <span>Historial de Actividad</span></div>
+          
+          <div className="odoo-log-feed">
             {logs.length === 0 && <div className="no-logs">Sin cambios registrados.</div>}
-            {paginatedLogs.map((log) => (
-              <div key={log.id} className="log-item-wrapper">
-                <div className="log-item">
-                  <div className="log-meta">
-                    <span className="log-user">{log.user_email?.split('@')[0] || 'Sistema'}</span>
-                    <span className="log-date">{new Date(log.created_at).toLocaleString('es-PA', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
-                  </div>
-                  <div className="log-action-area">
-                    <div className="ff-dot-wrapper">
-                      <div className="ff-step-dot is-active"><div className="ff-note-indicator-dot"></div></div>
-                      <div className="ff-note-tooltip ff-history-tooltip">
-                        <div className="ff-tooltip-tag">AUDITORÍA DE CAMBIOS</div>
-                        <div className="ff-history-changes-grid">
-                          {Object.entries(log.changes || {})
-                            .filter(([_, val]: [string, any]) => typeof val.new !== 'object')
-                            .map(([key, val]: [string, any]) => (
-                                <div key={key} className="ff-history-row">
-                                  <span className="ff-history-label">{FIELD_LABELS[key] || key}</span>
-                                  <div className="ff-history-vals">
-                                    <span className="ff-history-old">{key === 'terms' ? "Antiguo" : String(val.old ?? '—')}</span>
-                                    <ArrowRight size={10} style={{ opacity: 0.5 }} />
-                                    <span className="ff-history-new">{key === 'terms' ? "Nuevo" : String(val.new ?? '—')}</span>
-                                  </div>
-                                </div>
-                            ))}
-                        </div>
-                        <div className="ff-tooltip-arrow"></div>
-                      </div>
+            
+            {paginatedLogs.map((log) => {
+              const changes = Object.entries(log.changes || {});
+              if (changes.length === 0) return null;
+
+              return (
+                <div key={log.id} className="odoo-log-item">
+                  <div className="odoo-log-header">
+                    <div className="odoo-avatar">{log.user_email?.charAt(0).toUpperCase() || 'S'}</div>
+                    <div className="odoo-meta">
+                      <span className="odoo-user">{log.user_email?.split('@')[0] || 'Sistema'}</span>
+                      <span className="odoo-date">{new Date(log.created_at).toLocaleString('es-PA', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                     </div>
-                    <span className="log-summary-text">Actualizó {Object.keys(log.changes || {}).length} campos</span>
+                  </div>
+                  
+                  <div className="odoo-log-body">
+                    {changes.map(([key, val]: [string, any]) => {
+                      const isDocs = key === 'terms';
+                      return (
+                        <div key={key} className="odoo-change-line">
+                          <span className="o-label">{FIELD_LABELS[key] || key}:</span>
+                          <span className="o-old">{formatChangeVal(val?.old, isDocs)}</span>
+                          <ArrowRight size={10} className="o-arrow" />
+                          <span className="o-new">{formatChangeVal(val?.new, isDocs)}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
           
           {/* CONTROLES DE PAGINACIÓN */}
           {logs.length > LOGS_PER_PAGE && (
             <div className="log-pagination">
-              <button 
-                disabled={currentPage === 1} 
-                onClick={() => setCurrentPage(p => p - 1)}
-                className="pag-btn"
-              >
+              <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="pag-btn">
                 <ChevronLeft size={16} /> Anterior
               </button>
               <span className="pag-info">Página {currentPage} de {totalPages}</span>
-              <button 
-                disabled={currentPage === totalPages} 
-                onClick={() => setCurrentPage(p => p + 1)}
-                className="pag-btn"
-              >
+              <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)} className="pag-btn">
                 Siguiente <ChevronRight size={16} />
               </button>
             </div>
@@ -631,6 +749,10 @@ export default function AdminQuoteDetailPage() {
           width: 100%;
           background: white;
         }
+        
+        .tooltip-trigger-input { cursor: help !important; }
+
+        .toggle.readonly { opacity: 0.7; cursor: not-allowed; pointer-events: none; }
 
         .ff-input-compact { font-size: 12px !important; padding: 0 8px !important; }
 
@@ -638,6 +760,23 @@ export default function AdminQuoteDetailPage() {
         .toggle button { flex: 1; border: none; background: none; cursor: pointer; color: #94a3b8; display: flex; align-items: center; justify-content: center; padding: 0 10px; }
         .toggle button.active { background: white; color: #3b82f6; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
         
+        /* TOOLTIPS PARA COTIZACIONES */
+        .ff-tooltip-wrapper { position: relative; display: inline-flex; align-items: center; width: 100%; }
+        .ff-tooltip-content {
+          position: absolute; bottom: 110%; left: 50%; transform: translateX(-50%) translateY(10px);
+          background: #1e293b; color: white; padding: 10px 14px; border-radius: 12px;
+          font-size: 11px; font-weight: 500; white-space: nowrap; z-index: 100;
+          opacity: 0; visibility: hidden; pointer-events: none; transition: all 0.2s ease;
+          box-shadow: 0 10px 25px -5px rgba(0,0,0,0.2);
+        }
+        .ff-tooltip-content::after {
+          content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+          border-width: 5px; border-style: solid; border-color: #1e293b transparent transparent transparent;
+        }
+        .ff-tooltip-wrapper:hover .ff-tooltip-content { opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0); }
+        .loc-tooltip { display: flex; flex-direction: column; gap: 4px; align-items: center; }
+        .loc-tooltip strong { font-size: 12px; font-weight: 800; color: #34d399; letter-spacing: 0.5px; }
+
         .table-h { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; font-weight: 800; text-transform: uppercase; font-size: 12px; }
         .a-table { width: 100%; border-collapse: collapse; }
         .a-table th { font-size: 10px; color: #94a3b8; padding: 10px; border-bottom: 2px solid #f8fafc; text-align: left; }
@@ -662,21 +801,14 @@ export default function AdminQuoteDetailPage() {
         .terms-editor { width: 100%; min-height: 100px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; font-size: 13px; color: #475569; line-height: 1.5; outline: none; resize: vertical; background: #fffbeb; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .no-spin::-webkit-inner-spin-button, .no-spin::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        
+        input:disabled, select:disabled, textarea:disabled { 
+          background-color: #f8fafc !important; color: #64748b !important; cursor: not-allowed !important; border-color: #e2e8f0 !important;
+        }
 
         /* CHATTER LOGÍSTICO ESTILOS */
         .chatter-box { background: #f8fafc !important; border-left: 4px solid #3b82f6 !important; }
-        .chat-viewport { 
-          max-height: 400px; 
-          overflow-y: auto; 
-          display: flex; 
-          flex-direction: column; 
-          gap: 15px; 
-          padding: 15px;
-          background: white;
-          border-radius: 12px;
-          border: 1px solid #e2e8f0;
-          margin-bottom: 15px;
-        }
+        .chat-viewport { max-height: 400px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; padding: 15px; background: white; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 15px; }
         .empty-chat { text-align: center; color: #94a3b8; font-size: 13px; padding: 40px; }
         .chat-bubble-wrapper { display: flex; width: 100%; }
         .chat-bubble-wrapper.client { justify-content: flex-start; }
@@ -687,59 +819,46 @@ export default function AdminQuoteDetailPage() {
         .bubble-meta { font-size: 9px; font-weight: 800; text-transform: uppercase; margin-bottom: 4px; opacity: 0.8; }
         .bubble-text { font-size: 13px; font-weight: 500; line-height: 1.4; }
         .chat-input-area { display: flex; gap: 10px; background: white; padding: 10px; border-radius: 12px; border: 1px solid #e2e8f0; }
-        .chat-input-area textarea { 
-          flex: 1; 
-          border: none; 
-          resize: none; 
-          height: 45px; 
-          font-family: inherit; 
-          font-size: 13px; 
-          outline: none; 
-        }
-        .btn-send { 
-          background: #3b82f6; 
-          color: white; 
-          border: none; 
-          width: 45px; 
-          height: 45px; 
-          border-radius: 10px; 
-          cursor: pointer; 
-          display: flex; 
-          align-items: center; 
-          justify-content: center;
-          transition: 0.2s;
-        }
+        .chat-input-area textarea { flex: 1; border: none; resize: none; height: 45px; font-family: inherit; font-size: 13px; outline: none; }
+        .btn-send { background: #3b82f6; color: white; border: none; width: 45px; height: 45px; border-radius: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
         .btn-send:hover:not(:disabled) { background: #2563eb; transform: scale(1.05); }
         .btn-send:disabled { background: #cbd5e1; cursor: not-allowed; }
 
-        /* HISTORIAL */
-        .log-list { display: flex; flex-direction: column; }
+        /* HISTORIAL (ESTILO ODOO COMPACTO) */
+        .odoo-log-feed { display: flex; flex-direction: column; padding: 0 10px; }
         .no-logs { padding: 20px; text-align: center; color: #94a3b8; font-size: 13px; }
-        .log-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; background: #fff; border-bottom: 1px solid #f1f5f9; }
-        .log-meta { display: flex; flex-direction: column; }
-        .log-user { font-size: 12px; font-weight: 800; color: #1e293b; text-transform: capitalize; }
-        .log-date { font-size: 10px; color: #94a3b8; }
-        .log-action-area { display: flex; align-items: center; gap: 12px; }
-        .ff-dot-wrapper { height: 14px; width: 14px; position: relative; display: flex; align-items: center; justify-content: center; }
-        .ff-step-dot { width: 8px; height: 8px; background: #e2e8f0; border-radius: 50%; position: relative; }
-        .ff-step-dot.is-active { background: #166534; transform: scale(1.2); }
-        .ff-note-indicator-dot { position: absolute; top: -3px; right: -3px; width: 6px; height: 6px; background: #ea580c; border: 1.5px solid #fff; border-radius: 50%; }
-        .ff-note-tooltip { position: absolute; bottom: 25px; left: 50%; transform: translateX(-50%) translateY(10px); width: 280px; background: #1e293b; padding: 14px; border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3); z-index: 100; opacity: 0; visibility: hidden; transition: 0.2s; }
-        .log-action-area:hover .ff-note-tooltip { opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0); }
-        .ff-tooltip-tag { font-size: 9px; font-weight: 800; color: #94a3b8; margin-bottom: 8px; }
-        .ff-history-changes-grid { display: flex; flex-direction: column; gap: 8px; }
-        .ff-history-row { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px; }
-        .ff-history-label { font-size: 9px; color: #94a3b8; font-weight: 800; text-transform: uppercase; }
-        .ff-history-vals { display: flex; align-items: center; gap: 8px; }
-        .ff-history-old { color: #f87171; font-size: 10px; text-decoration: line-through; }
-        .ff-history-new { color: #4ade80; font-size: 11px; font-weight: 700; color: white; }
-        .ff-tooltip-arrow { position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%); border-left: 7px solid transparent; border-right: 7px solid transparent; border-top: 7px solid #1e293b; }
         
-        .log-pagination { display: flex; justify-content: center; align-items: center; gap: 20px; padding: 20px; background: #f8fafc; border-top: 1px solid #e2e8f0; border-radius: 0 0 12px 12px; }
-        .pag-btn { display: flex; align-items: center; gap: 6px; padding: 8px 16px; background: white; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 12px; font-weight: 700; color: #64748b; cursor: pointer; transition: 0.2s; }
+        .odoo-log-item { display: flex; flex-direction: column; gap: 6px; padding: 12px 0; border-bottom: 1px solid #f1f5f9; }
+        .odoo-log-item:last-child { border-bottom: none; padding-bottom: 0; }
+        
+        .odoo-log-header { display: flex; align-items: center; gap: 10px; }
+        .odoo-avatar { 
+          width: 24px; height: 24px; background: #e2e8f0; color: #475569; 
+          border-radius: 50%; display: flex; align-items: center; justify-content: center; 
+          font-size: 10px; font-weight: 800; text-transform: uppercase;
+        }
+        .odoo-meta { display: flex; align-items: center; gap: 8px; }
+        .odoo-user { font-size: 12px; font-weight: 700; color: #1e293b; text-transform: capitalize; }
+        .odoo-date { font-size: 11px; color: #94a3b8; }
+        
+        .odoo-log-body { padding-left: 34px; display: flex; flex-direction: column; gap: 4px; }
+        .odoo-change-line { 
+          display: flex; align-items: center; gap: 8px; 
+          font-size: 11.5px; font-family: 'JetBrains Mono', monospace; 
+        }
+        .o-label { 
+          color: #64748b; font-weight: 600; font-family: 'Inter', sans-serif; 
+          font-size: 11px; min-width: 120px;
+        }
+        .o-old { color: #94a3b8; text-decoration: line-through; }
+        .o-arrow { color: #cbd5e1; }
+        .o-new { color: #10b981; font-weight: 700; }
+        
+        .log-pagination { display: flex; justify-content: center; align-items: center; gap: 20px; padding: 15px 0 0; margin-top: 10px; border-top: 1px solid #f1f5f9; }
+        .pag-btn { display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: white; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 11px; font-weight: 700; color: #64748b; cursor: pointer; transition: 0.2s; }
         .pag-btn:hover:not(:disabled) { background: #f1f5f9; color: #1e293b; }
         .pag-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .pag-info { font-size: 12px; font-weight: 600; color: #94a3b8; }
+        .pag-info { font-size: 11px; font-weight: 600; color: #94a3b8; }
       `}</style>
     </AdminLayout>
   ); 

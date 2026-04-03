@@ -34,6 +34,7 @@ export const handler: Handler = async (event) => {
         status, 
         mode, 
         currency, 
+        origin,
         destination,
         total,
         boxes, 
@@ -57,7 +58,7 @@ export const handler: Handler = async (event) => {
     if (status) query = query.eq("status", status);
     
     if (q) {
-      query = query.or(`destination.ilike.%${q}%, quote_number.ilike.%${q}%`);
+      query = query.or(`destination.ilike.%${q}%, origin.ilike.%${q}%, quote_number.ilike.%${q}%`);
     }
 
     query = query
@@ -72,8 +73,6 @@ export const handler: Handler = async (event) => {
     }
 
     const items = (data || []).map((r: any) => {
-      // ✅ LOGICA DE TOTALES: Prioridad al valor calculado en el JSON 'totals'
-      // Esto soluciona el problema de los totales en 0 cuando la columna 'total' no está sincronizada.
       const finalTotal = r.totals?.total ?? r.total ?? 0;
 
       return {
@@ -84,6 +83,7 @@ export const handler: Handler = async (event) => {
         status: r.status,
         mode: r.mode,
         currency: r.currency,
+        origin: r.origin, 
         destination: r.destination,
         boxes: r.boxes,
         weight_kg: r.weight_kg,

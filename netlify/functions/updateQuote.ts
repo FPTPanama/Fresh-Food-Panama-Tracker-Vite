@@ -2,9 +2,6 @@
 import type { Handler } from "@netlify/functions";
 import { sbAdmin, getUserAndProfile, json, text, isPrivilegedRole, optionsResponse } from "./_util";
 
-/**
- * Función auxiliar para generar el siguiente correlativo oficial Q/
- */
 function pad5(n: number) {
   const x = Math.max(0, Math.floor(n));
   return String(x).padStart(5, "0");
@@ -30,6 +27,30 @@ async function getNextOfficialNumber(year: number) {
   return `${prefix}${pad5(next)}`;
 }
 
+/**
+ * Función auxiliar para generar el correlativo de Embarques SHP-YYYY-NNNN
+ */
+async function getNextShipmentNumber(year: number) {
+  const prefix = `SHP-${year}-`;
+  const { data, error } = await sbAdmin
+    .from("shipments")
+    .select("code")
+    .ilike("code", `${prefix}%`)
+    .order("code", { ascending: false })
+    .limit(1);
+
+  if (error || !data?.[0]?.code) {
+    return `${prefix}0001`;
+  }
+
+  const last = String(data[0].code).trim();
+  const tail = last.slice(prefix.length);
+  const lastN = Number(tail);
+  const next = Number.isFinite(lastN) ? lastN + 1 : 1;
+  
+  return `${prefix}${String(next).padStart(4, "0")}`;
+}
+
 export const handler: Handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return optionsResponse();
   if (event.httpMethod !== "POST") return text(405, "Method not allowed");
@@ -44,10 +65,9 @@ export const handler: Handler = async (event) => {
     const id = String(body.id || "").trim();
     if (!id) return text(400, "Missing id");
 
-    // 1. OBTENER DATOS ACTUALES PARA COMPARAR ESTADOS
     const { data: currentQuote, error: fetchError } = await sbAdmin
       .from("quotes")
-      .select("status, quote_number")
+      .select("status, quote_number, product_id, client_id, origin") // FIX: 'origin' agregado al select
       .eq("id", id)
       .single();
 
@@ -57,8 +77,9 @@ export const handler: Handler = async (event) => {
       updated_at: new Date().toISOString()
     };
 
+    // FIX: 'origin' agregado a la lista blanca de campos permitidos
     const allowed = [
-      "client_id", "status", "mode", "currency", "destination", 
+      "client_id", "status", "mode", "currency", "origin", "destination", 
       "boxes", "weight_kg", "margin_markup", "payment_terms", 
       "terms", "client_snapshot", "costs", "totals", "product_id", "product_details"
     ];
@@ -69,15 +90,11 @@ export const handler: Handler = async (event) => {
       }
     }
 
-    // 2. LÓGICA DE TRANSFORMACIÓN RFQ -> Q
     const oldStatus = String(currentQuote.status).toLowerCase();
     const newStatus = String(patch.status || currentQuote.status).toLowerCase();
     const currentNum = String(currentQuote.quote_number);
 
-    // Estados que califican para tener número "Q"
     const officialStatuses = ['draft', 'sent', 'approved', 'rejected', 'expired'];
-    
-    // Condición: Si actualmente es RFQ (o estatus solicitud) y el nuevo estatus es oficial
     const isCurrentRFQ = currentNum.startsWith('RFQ/') || oldStatus === 'solicitud';
     const isTargetOfficial = officialStatuses.includes(newStatus);
 
@@ -86,11 +103,9 @@ export const handler: Handler = async (event) => {
       patch.quote_number = await getNextOfficialNumber(year);
     }
 
-    // Normalización
     if (patch.mode) patch.mode = String(patch.mode).toUpperCase();
     if (patch.currency) patch.currency = String(patch.currency).toUpperCase();
 
-    // 3. ACTUALIZACIÓN FINAL
     const { error: updateError } = await sbAdmin
       .from("quotes")
       .update(patch)
@@ -99,6 +114,54 @@ export const handler: Handler = async (event) => {
     if (updateError) {
       console.error("Error DB updateQuote:", updateError.message);
       return text(500, updateError.message);
+    }
+
+    if (newStatus === 'approved') {
+      const { data: existingShip } = await sbAdmin
+        .from('shipments')
+        .select('id')
+        .eq('quote_id', id)
+        .maybeSingle();
+
+      if (!existingShip) {
+        const year = new Date().getFullYear();
+        const shipmentCode = await getNextShipmentNumber(year);
+
+        let prodName = "Fruta";
+        let variety = patch.product_details?.variety || "";
+        
+        if (patch.product_id || currentQuote.product_id) {
+          const { data: p } = await sbAdmin
+            .from('products')
+            .select('name')
+            .eq('id', patch.product_id || currentQuote.product_id)
+            .single();
+          if (p) prodName = p.name;
+        }
+
+        const { error: shipError } = await sbAdmin
+          .from('shipments')
+          .insert({
+            quote_id: id,
+            client_id: patch.client_id || currentQuote.client_id,
+            boxes: Number(patch.boxes || 0),
+            pallets: Number(patch.totals?.meta?.pallets || 0),
+            weight_kg: Number(patch.weight_kg || 0),
+            product_name: prodName,
+            product_variety: variety,
+            product_mode: patch.mode || "AIR",
+            caliber: patch.product_details?.caliber || "",
+            color: patch.product_details?.color || "",
+            brix_grade: patch.product_details?.brix || "",
+            origin: patch.origin || currentQuote.origin || "PTY", // FIX: Origen enviado al embarque
+            destination: patch.destination || "",
+            incoterm: patch.totals?.meta?.incoterm || "CIP",
+            status: 'CREATED',
+            code: shipmentCode
+          });
+
+        if (shipError) console.error("Error creando embarque automático:", shipError.message);
+      }
     }
 
     return json(200, { 

@@ -6,7 +6,6 @@ interface Location {
   id?: string;
   code: string;
   name: string;
-  city: string;
   country: string;
   type: "AIR" | "SEA";
 }
@@ -35,7 +34,7 @@ export function LocationSelector({
           .select('name, code')
           .eq('code', value)
           .maybeSingle();
-        if (data) setQuery(`${data.code} - ${data.name}`);
+        if (data) setQuery(data.code);
       };
       fetchCurrent();
     }
@@ -62,11 +61,12 @@ export function LocationSelector({
     setLoading(true);
     setIsOpen(true);
     
+    // FIX: Eliminada la columna inexistente 'city' para evitar el crash de PostgREST
     const { data } = await supabase
       .from('master_locations')
       .select('*')
       .eq('type', mode)
-      .or(`name.ilike.%${q}%,code.ilike.%${q}%,city.ilike.%${q}%,country.ilike.%${q}%`)
+      .or(`name.ilike.%${q}%,code.ilike.%${q}%,country.ilike.%${q}%`)
       .limit(6);
 
     setResults((data as Location[]) || []);
@@ -74,7 +74,7 @@ export function LocationSelector({
   };
 
   const handleSelect = (loc: Location) => {
-    setQuery(`${loc.code} - ${loc.name}`);
+    setQuery(loc.code);
     onChange(loc.code); 
     setIsOpen(false);
   };
@@ -84,12 +84,12 @@ export function LocationSelector({
     setLoading(true);
     const tempCode = "MAN-" + query.substring(0, 3).toUpperCase(); 
     
+    // FIX: Adaptado a la estructura real de la tabla (sin 'city' ni 'flag')
     const { data, error } = await supabase
       .from('master_locations')
       .insert([{
         code: tempCode,
         name: query,
-        city: 'Manual',
         country: 'Destino Nuevo',
         type: mode
       }])
@@ -127,7 +127,8 @@ export function LocationSelector({
                   <span className="ff-location-code-tag">{loc.code}</span>
                   <span className="ff-location-name">{loc.name}</span>
                 </div>
-                <span className="ff-location-sub">{loc.city}, {loc.country}</span>
+                {/* FIX: Mostrar solo el país ya que no hay ciudad en la BD */}
+                <span className="ff-location-sub">{loc.country}</span>
               </div>
             </div>
           ))}
@@ -141,37 +142,54 @@ export function LocationSelector({
         </div>
       )}
 
-      {/* Reemplazamos style jsx por un tag de estilo estándar compatible con Vite/React */}
+      {/* ESTILOS ADAPTADOS A LA MARCA FRESHCONNECT */}
       <style>{`
         .ff-location-wrapper { position: relative; width: 100%; }
+        
+        /* El input group es transparente para que herede los bordes del modal padre si existe,
+           pero tiene su propio borde por si se usa suelto en la app */
         .ff-location-input-group { 
-          display: flex; align-items: center; background: #f8fafc;
-          border: 2px solid #e2e8f0; border-radius: 12px; padding: 0 12px;
-          transition: all 0.2s ease;
+          display: flex; align-items: center; background: transparent;
+          width: 100%; transition: all 0.2s ease;
         }
-        .ff-location-input-group:focus-within { border-color: #22c55e; background: white; }
-        .ff-location-icon-prefix { color: #94a3b8; }
+        .ff-location-icon-prefix { color: #227432; margin-right: 8px; display: flex; align-items: center; }
+        
         .ff-location-input-group input { 
-          flex: 1; border: none !important; padding: 14px 12px !important; outline: none !important; 
-          font-size: 14px; color: #1e293b; font-weight: 700; background: transparent !important;
+          flex: 1; border: none !important; padding: 0 !important; outline: none !important; 
+          font-size: 15px !important; color: #224C22 !important; font-weight: 700 !important; 
+          background: transparent !important; font-family: 'Poppins', sans-serif;
         }
+        .ff-location-input-group input::placeholder { opacity: 0.4; font-weight: 500; }
+        
         .ff-location-dropdown { 
-          position: absolute; top: calc(100% + 8px); left: 0; right: 0; z-index: 9999;
-          background: white; border: 1px solid #e2e8f0; border-radius: 16px;
-          box-shadow: 0 20px 40px rgba(0,0,0,0.12); overflow: hidden;
+          position: absolute; top: calc(100% + 15px); left: -15px; right: -15px; z-index: 99999;
+          background: white; border: 2px solid #224C22; border-radius: 16px;
+          box-shadow: 0 40px 100px -20px rgba(0,0,0,0.4); overflow: hidden;
         }
+        
         .ff-location-option { 
-          display: flex; align-items: center; gap: 14px; padding: 12px 16px;
-          cursor: pointer; border-bottom: 1px solid #f1f5f9;
+          display: flex; align-items: center; gap: 14px; padding: 14px 20px;
+          cursor: pointer; border-bottom: 1px solid rgba(34, 76, 34, 0.05); transition: 0.2s;
         }
-        .ff-location-option:hover { background: #f0fdf4; }
-        .ff-location-loc-icon { color: #22c55e; }
-        .ff-location-details { display: flex; flex-direction: column; }
-        .ff-location-code-tag { background: #0f172a; color: white; font-size: 10px; padding: 2px 6px; border-radius: 4px; margin-right: 8px; font-weight: 800; }
-        .ff-location-name { font-size: 13px; font-weight: 700; color: #1e293b; }
-        .ff-location-sub { font-size: 11px; color: #64748b; text-transform: uppercase; }
-        .ff-location-create-new { color: #15803d; background: #f0fdf4; }
-        .ff-spin { animation: ff-rotate 1s linear infinite; color: #22c55e; }
+        .ff-location-option:hover { background: #f0f4ef; }
+        
+        .ff-location-loc-icon { color: #227432; display: flex; align-items: center; }
+        
+        .ff-location-details { display: flex; flex-direction: column; gap: 2px; }
+        .ff-location-main-info { display: flex; align-items: center; gap: 8px; }
+        
+        .ff-location-code-tag { 
+          background: #224C22; color: white; font-size: 10px; padding: 3px 8px; 
+          border-radius: 6px; font-weight: 800; letter-spacing: 0.5px;
+        }
+        .ff-location-name { font-size: 13px; font-weight: 700; color: #224C22; }
+        .ff-location-sub { font-size: 11px; color: #224C22; opacity: 0.6; text-transform: uppercase; font-weight: 600; }
+        
+        .ff-location-create-new { color: #D17711; background: #fff7ed; }
+        .ff-location-create-new:hover { background: #ffedd5; }
+        .ff-location-create-new b { font-weight: 800; }
+        
+        .ff-spin { animation: ff-rotate 1s linear infinite; color: #D17711; }
         @keyframes ff-rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
     </div>

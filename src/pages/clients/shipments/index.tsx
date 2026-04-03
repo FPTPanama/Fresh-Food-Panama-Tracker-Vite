@@ -57,7 +57,7 @@ export default function ShipmentsPage() {
             </div>
           </div>
           <button className="ff-quote-btn" onClick={() => window.open('https://wa.me/50762256452', '_blank')}>
-            <Plus size={16} /> Asistencia
+            <Plus size={16} /> SOLICITAR CARGA
           </button>
         </div>
 
