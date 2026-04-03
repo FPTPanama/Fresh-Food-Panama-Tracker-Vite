@@ -153,7 +153,14 @@ export default function LoginPage() {
         <div className="ff-login-form-side">
           <div className="ff-form-inner">
             <div className="ff-form-header">
-              <img src="/brand/freshfood_logo.png" alt="FreshConnect" className="ff-form-logo" />
+              <img 
+  src="/brand/freshfood-logo.svg" 
+  alt="FreshConnect" 
+  className="ff-form-logo"
+  fetchPriority="high"
+  loading="eager"
+  decoding="async"
+/>
               
               {view === "login" ? (
                 <>
