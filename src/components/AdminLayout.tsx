@@ -5,7 +5,7 @@ import { getApiBase } from "../lib/apiBase";
 import { useUILang } from "../lib/uiLanguage";
 import {
   LayoutGrid, Package, Users, Globe, ChevronDown, LogOut, Search, Loader2,
-  UserCircle2, FileText, CheckCircle2, AlertCircle, ArrowRight, Ship
+  UserCircle2, FileText, CheckCircle2, AlertCircle, ArrowRight, Ship, Target
 } from "lucide-react";
 
 const LOGO_WHITE = "/brand/freshconnect_blanco.svg";
@@ -43,11 +43,13 @@ export function AdminLayout({ title, subtitle, children }: { title?: string; sub
     setTimeout(() => setToast(null), 4000);
   };
 
-  const nav = useMemo(() => [
+ const nav = useMemo(() => [
     { href: "/admin/dashboard", label: lang === "es" ? "Dashboard" : "Dashboard", icon: LayoutGrid },
     { href: "/admin/shipments", label: lang === "es" ? "Embarques" : "Shipments", icon: Package },
     { href: "/admin/quotes", label: lang === "es" ? "Cotizaciones" : "Quotes", icon: FileText },
     { href: "/admin/users", label: lang === "es" ? "Clientes" : "Clients", icon: Users },
+    // NUEVA SECCIÓN DE PROSPECCIÓN IA
+    { href: "/admin/leads", label: lang === "es" ? "Lead Center" : "Lead Center", icon: Target }, 
   ], [lang]);
 
   const handleGlobalSearch = async (val: string) => {

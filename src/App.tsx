@@ -4,6 +4,7 @@ import { supabase } from "@/lib/supabaseClient";
 import "./styles/globals.css";
 import { LanguageProvider } from "@/lib/uiLanguage";
 
+
 // --- COMPONENTE DE CARGA ---
 const PageLoader = () => (
   <div className="ff-loader-full">
@@ -97,6 +98,8 @@ const AdminQuoteDetailPage = lazy(() => import('@/pages/admin/quotes/[id]'));
 const AdminUsers = lazy(() => import('@/pages/admin/users/index'));
 const AdminUserDetail = lazy(() => import('@/pages/admin/users/UserDetail'));
 const StaffDetail = lazy(() => import('@/pages/admin/staff/StaffDetail'));
+const AdminLeads = lazy(() => import('./pages/admin/LeadsIndex')); // <--- NUEVO
+
 
 // --- COMPONENTE DE REDIRECCIÓN INTELIGENTE ---
 const HomeRedirect = () => {
@@ -170,6 +173,9 @@ export default function App() {
             <Route path="/admin/users" element={<ProtectedRoute requiredRole="admin"><AdminUsers /></ProtectedRoute>} />
             <Route path="/admin/users/:id" element={<ProtectedRoute requiredRole="admin"><AdminUserDetail /></ProtectedRoute>} />
             <Route path="/admin/staff/:id" element={<ProtectedRoute requiredRole="admin"><StaffDetail /></ProtectedRoute>} />
+
+            {/* CRM DE PROSPECCIÓN IA */}
+            <Route path="/admin/leads" element={<ProtectedRoute requiredRole="admin"><AdminLeads /></ProtectedRoute>} /> {/* <--- NUEVO */}
 
             {/* Redirecciones Finales */}
             <Route path="/" element={<HomeRedirect />} />
