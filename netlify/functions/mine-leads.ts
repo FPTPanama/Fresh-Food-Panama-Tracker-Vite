@@ -1,54 +1,57 @@
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
+const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
-export const handler = async () => {
+export const handler = async (event: any) => {
+  // 1. Recibimos Ubicación y PRODUCTO desde la interfaz
+  let location = "Mercamadrid, España";
+  let product = "Piña Premium y frutas exóticas"; // Valor por defecto
+  
+  if (event.body) {
+    const body = JSON.parse(event.body);
+    if (body.location) location = body.location;
+    if (body.product) product = body.product;
+  }
+
   try {
-    // 2026 Standard: Usamos el ID de modelo limpio
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const { data: existing } = await supabase.from('leads_prospecting').select('company_name').limit(100);
+    const blacklist = existing?.map(e => e.company_name).join(', ') || 'Ninguna';
 
-    const prompt = `Actúa como un experto en mercados de frutas. 
-    Encuentra 3 empresas reales en Mercamadrid que importen piña premium. 
-    Responde ÚNICAMENTE con un array JSON: 
-    [{"company_name": "Nombre", "city": "Madrid", "country": "España", "website": "URL", "contact_email": "Email", "ai_analysis": "breve análisis"}]`;
+    // 2. El Prompt ahora es 100% dinámico
+    const prompt = `
+      Actúa como un analista de mercado hispanohablante.
+      Identifica 10 empresas reales en ${location} que sean importadores o distribuidores de ${product}.
+      EXCLUYE estas empresas: [${blacklist}].
+      
+      REGLA DE ORO: Todo el contenido del JSON debe estar ESTRICTAMENTE EN ESPAÑOL.
+      
+      Para el campo "ai_analysis", usa estrictamente este formato de 4 puntos en español:
+      "Foco: [Su nicho] | Vol: [Alto/Medio/Bajo] | Log: [Aérea/Marítima/Terrestre] | Segmento: [Minorista/Mayorista/Horeca]"
+      
+      Devuelve ÚNICAMENTE un array JSON con: company_name, city, country, website, contact_email, contact_phone, company_size, air_experience, ai_analysis, lead_score (1-5).
+    `;
 
-    // Generar contenido
     const result = await model.generateContent(prompt);
     const text = result.response.text();
+    const cleanJson = text.substring(text.indexOf('['), text.lastIndexOf(']') + 1);
+    const leads = JSON.parse(cleanJson);
 
-    // Limpiador robusto de JSON (ignora si la IA pone texto antes o después)
-    const start = text.indexOf('[');
-    const end = text.lastIndexOf(']');
-    if (start === -1) throw new Error("La IA no devolvió un formato JSON.");
-    
-    const leads = JSON.parse(text.substring(start, end + 1));
+    // Guardamos en la fuente (source) el producto para saber de qué campaña vino
+    const { error } = await supabase.from('leads_prospecting').insert(
+      leads.map((l: any) => ({ 
+        ...l, 
+        status: 'new', 
+        source: `manual_${product.substring(0,10).replace(/\s/g, '_')}` 
+      }))
+    );
 
-    // Inserción en Supabase
-    const { error: dbError } = await supabase
-      .from('leads_prospecting')
-      .insert(leads);
-
-    if (dbError) throw new Error(`Supabase: ${dbError.message}`);
-
-    return {
-      statusCode: 200,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-      body: JSON.stringify({ message: "Éxito", count: leads.length }),
-    };
+    if (error) throw error;
+    return { statusCode: 200, body: JSON.stringify({ message: `Minado exitoso: 10 leads para ${product}`, count: leads.length }) };
 
   } catch (err: any) {
-    // Si el error persiste, nos dirá exactamente por qué
-    console.error("ERROR EN EL MINADO:", err.message);
-    return {
-      statusCode: 500,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ error: err.message })
-    };
+    return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
   }
 };
