@@ -1,83 +1,55 @@
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-// Inicializamos Supabase con la Service Role Key para saltar RLS en el insert
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
+const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 export const handler = async () => {
-  // CONFIGURACIÓN 2026: Usamos el ID de modelo estándar sin sufijos beta
-  const model = genAI.getGenerativeModel({ 
-    model: "gemini-1.5-flash" 
-  });
-
-  const prompt = `
-    Actúa como un Analista de Inteligencia de Mercados especializado en frutas tropicales.
-    Identifica 5 empresas REALES que operen en MERCAMADRID (España) y que sean importadores activos de "Piña Avión" (MD2 Premium) o frutas exóticas de alta gama.
-    
-    Es vital que los datos sean coherentes. Devuelve ÚNICAMENTE un arreglo JSON (sin texto extra, sin markdown) con este formato:
-    [{
-      "company_name": "Nombre de la Empresa",
-      "city": "Madrid",
-      "country": "España",
-      "website": "https://url-real-o-vacia.com",
-      "contact_email": "email-de-contacto@empresa.com",
-      "preferred_language": "es",
-      "ai_analysis": "Análisis de por qué es buen prospecto para Piña Panameña"
-    }]
-  `;
-
   try {
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-    // LIMPIEZA "BULL-PROOF" DEL JSON
-    // Buscamos el primer '[' y el último ']' por si la IA devuelve markdown (```json ...)
+    // Prompt ultra-simplificado para evitar timeouts y errores de formato
+    const prompt = `Genera un JSON con exactamente 2 empresas reales de Mercamadrid importadoras de fruta. 
+    Usa estrictamente este formato de array: 
+    [{"company_name": "Nombre", "city": "Madrid", "country": "España", "website": "URL", "contact_email": "email", "ai_analysis": "breve nota"}]`;
+
+    const result = await model.generateContent(prompt);
+    const text = result.response.text();
+
+    // Limpieza de JSON
     const start = text.indexOf('[');
     const end = text.lastIndexOf(']');
-    
-    if (start === -1 || end === -1) {
-      console.error("Respuesta cruda de la IA:", text);
-      throw new Error("La IA no devolvió un formato JSON válido.");
-    }
-    
-    const cleanJson = text.substring(start, end + 1);
-    const leads = JSON.parse(cleanJson);
+    if (start === -1) throw new Error("La IA no generó un JSON válido");
+    const leads = JSON.parse(text.substring(start, end + 1));
 
-    // INSERCIÓN EN SUPABASE
-    const { data, error: dbError } = await supabase
+    // Mapeo manual para asegurar que los campos sean EXACTOS a tu DB
+    const cleanLeads = leads.map((l: any) => ({
+      company_name: l.company_name || 'Sin nombre',
+      city: l.city || 'Madrid',
+      country: l.country || 'España',
+      website: l.website || '',
+      contact_email: l.contact_email || '',
+      ai_analysis: l.ai_analysis || 'Identificado vía Gemini Pro',
+      status: 'new'
+    }));
+
+    const { error: dbError } = await supabase
       .from('leads_prospecting')
-      .insert(leads)
-      .select();
+      .insert(cleanLeads);
 
-    if (dbError) throw dbError;
+    if (dbError) throw new Error(`Supabase Error: ${dbError.message}`);
 
     return {
       statusCode: 200,
-      headers: { 
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*" 
-      },
-      body: JSON.stringify({ 
-        message: `${leads.length} prospectos identificados y guardados.`, 
-        count: leads.length 
-      }),
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      body: JSON.stringify({ message: "Éxito", count: cleanLeads.length }),
     };
 
   } catch (err: any) {
-    console.error("Error crítico en Lead Miner:", err.message);
     return {
       statusCode: 500,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ 
-        error: "Fallo en el proceso de minado", 
-        details: err.message 
-      })
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      body: JSON.stringify({ error: err.message })
     };
   }
 };
