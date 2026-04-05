@@ -6,11 +6,8 @@ const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SE
 
 export const handler: Handler = async (event) => {
   if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method Not Allowed" };
-  
-  // Seguridad extra: Si no hay body, no hacemos nada
   if (!event.body) return { statusCode: 400, body: "Bad Request: No body" };
 
-  // SOLUCIÓN AQUÍ: Le decimos a TypeScript que esta promesa devuelve un <HandlerResponse>
   return new Promise<HandlerResponse>((resolve) => {
     const busboy = Busboy({ headers: event.headers });
     const result: any = {};
@@ -20,7 +17,6 @@ export const handler: Handler = async (event) => {
     });
 
     busboy.on('finish', async () => {
-      // Asegurarnos de que las variables existen para no romper el código
       const from = result.from || "Desconocido";
       const subject = result.subject || "Sin asunto";
       const text = result.text || "";
@@ -39,7 +35,7 @@ export const handler: Handler = async (event) => {
           target_alias: to
         }]).select().single();
 
-      // 2. LÓGICA DE FILTRADO PARA WHATSAPP
+      // 2. LÓGICA DE FILTRADO
       const opKeywords = ["factura", "cotización", "cotizacion", "retraso", "cambio de vuelo", "vuelo"];
       let shouldNotify = false;
       let icon = "📩";
@@ -50,18 +46,45 @@ export const handler: Handler = async (event) => {
         shouldNotify = true; icon = "🚢 OPERACIONES";
       }
 
-      // 3. DISPARAR WHATSAPP
+      // 3. DISPARAR WHATSAPP VÍA TWILIO
       if (shouldNotify && !dbError) {
-        const waMsg = `${icon}\nDe: ${from}\nAsunto: ${subject}`;
-        console.log("Notificación lista para WhatsApp:", waMsg);
+        const waMsg = `${icon} Nuevo Correo\nDe: ${from}\nAsunto: ${subject}`;
         
-        // Aquí conectaremos tu función de Twilio después
+        // Variables de entorno de Twilio
+        const twilioSid = process.env.TWILIO_ACCOUNT_SID;
+        const twilioToken = process.env.TWILIO_AUTH_TOKEN;
+        const twilioFrom = process.env.TWILIO_WA_FROM; // Usando tu nombre de variable /
+        const myWhatsApp = process.env.ADMIN_WHATSAPP_NUMBER; // ej: whatsapp:+507...
+
+        if (twilioSid && twilioToken && twilioFrom && myWhatsApp) {
+          const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
+          const waPayload = new URLSearchParams({
+            From: twilioFrom,
+            To: myWhatsApp,
+            Body: waMsg
+          });
+
+          try {
+            await fetch(twilioUrl, {
+              method: 'POST',
+              headers: {
+                'Authorization': 'Basic ' + Buffer.from(`${twilioSid}:${twilioToken}`).toString('base64'),
+                'Content-Type': 'application/x-www-form-urlencoded'
+              },
+              body: waPayload
+            });
+            console.log("WhatsApp enviado a", myWhatsApp);
+          } catch (waError) {
+            console.error("Error de conexión con Twilio:", waError);
+          }
+        } else {
+          console.error("Faltan variables de Twilio en Netlify");
+        }
       }
 
       resolve({ statusCode: 200, body: "OK" });
     });
 
-    // SendGrid a veces manda en base64, a veces en utf8
     const bodyBuffer = Buffer.from(event.body || "", event.isBase64Encoded ? "base64" : "utf8");
     busboy.write(bodyBuffer);
     busboy.end();
