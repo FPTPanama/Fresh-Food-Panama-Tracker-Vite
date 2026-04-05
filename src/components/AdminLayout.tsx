@@ -223,7 +223,7 @@ export function AdminLayout({ title, subtitle, children }: { title?: string; sub
                     <div className="ff-user__metaRole">{lang === "es" ? "Rol" : "Role"}: <b>{me.role}</b></div>
                   </div>
                   <div className="ff-user__sep" />
-                  <button type="button" className="ff-user__item" onClick={() => {navigate("/admin/profile"); setMenuOpen(false);}}>
+                  <button type="button" className="ff-user__item" onClick={() => {navigate("/admin/company"); setMenuOpen(false);}}>
                     <UserCircle2 size={16} /> <span>Perfil</span>
                   </button>
                   <button type="button" className="ff-user__item danger" onClick={async () => { await supabase.auth.signOut(); navigate("/login"); }}>

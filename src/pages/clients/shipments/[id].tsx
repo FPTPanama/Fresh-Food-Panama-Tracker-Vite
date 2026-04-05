@@ -1,361 +1,567 @@
-import { useEffect, useMemo, useState } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom"; 
-import { supabase } from "../../../lib/supabaseClient";
-import { getApiBase } from "../../../lib/apiBase";
-import { ClientLayout } from "../../../components/ClientLayout";
-import { ProgressStepper } from "../../../components/ProgressStepper";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { supabase } from "@/lib/supabaseClient";
+import { getApiBase } from "@/lib/apiBase";
+import { ClientLayout } from "@/components/ClientLayout";
+import { useUILang } from "@/lib/uiLanguage";
+import { Timeline as ModernTimeline } from "@/components/Timeline";
 
-import { 
-  FileText, 
-  Image as ImageIcon, 
-  Download, 
-  ArrowLeft, 
-  Package, 
-  MapPin, 
-  CheckCircle2,
-  FileCheck,
-  ExternalLink,
-  Loader2
+import {
+  FileText, Image as ImageIcon, Download, ArrowLeft, Package, CheckCircle, 
+  Loader2, Globe, MapPin, Check, Scale, Plane, Clock, Ship,
+  MessageSquare
 } from "lucide-react";
 
-/* =======================
-   Types & Config
-======================= */
-type Milestone = { type: string; at: string; note?: string | null };
-type FileItem = { id: string; filename: string; created_at: string; doc_type?: string | null; url?: string | null; };
+// --- TIPOS ---
+type ShipmentMilestone = { 
+  id?: string;
+  type: string; 
+  at: string; 
+  note?: string | null; 
+  actor_email?: string | null;
+  author?: { name: string } | null; 
+};
+
+type ShipmentFile = { 
+  id: string; 
+  kind: "doc" | "photo";
+  doc_type?: string | null; 
+  filename: string; 
+  created_at: string; 
+  url?: string | null;
+};
+
 type ShipmentDetail = {
-  id: string; code: string; destination: string; incoterm?: string | null; status: string;
-  created_at: string; client_name?: string | null; clients?: { name?: string | null } | null;
-  client?: { name?: string | null } | null; product_name?: string | null; product_variety?: string | null;
-  product_mode?: string | null; caliber?: string | null; color?: string | null;
-  boxes?: number | null; pallets?: number | null; weight_kg?: number | null;
-  flight_number?: string | null; awb?: string | null; milestones: Milestone[];
-  documents: FileItem[]; photos: FileItem[]; flight_departure_time?: string | null;
-  flight_arrival_time?: string | null; flight_status?: string | null; last_api_sync?: string | null;
+  id: string; 
+  code: string; 
+  origin?: string | null;
+  destination: string; 
+  status: string; 
+  created_at: string;
+  client_name?: string | null;
+  product_name?: string | null;
+  product_variety?: string | null;
+  product_mode?: string | null;
+  boxes?: number | null;
+  pallets?: number | null;
+  weight_kg?: number | null;
+  flight_number?: string | null;
+  awb?: string | null;
+  calibre?: string | null;
+  color?: string | null;
+  brix_grade?: string | null;
+  milestones: ShipmentMilestone[];
+  documents: ShipmentFile[];
+  photos: ShipmentFile[];
 };
 
-const DOC_LABELS: Record<string, string> = {
-  invoice: "Factura Comercial",
-  packing_list: "Lista de Empaque",
-  awb: "Guía Aérea (AWB)",
-  phytosanitary: "Cert. Fitosanitario",
-  eur1: "Certificado EUR.1",
-  export_declaration: "DEX (Exportación)",
-  non_recyclable_plastics: "Decl. Plásticos",
-  sanitary_general_info: "Info. Sanitaria",
-  additives_declaration: "Decl. Aditivos",
-  quality_report: "Informe Calidad"
-};
-
-function clientNameLine(d: ShipmentDetail) {
-  return String(d.client_name || d.clients?.name || d.client?.name || "").trim() || "—";
-}
-
-function productLine(d: ShipmentDetail) {
-  const name = String(d.product_name || "").trim();
-  const variety = String(d.product_variety || "").trim();
-  const modeRaw = String(d.product_mode || "").trim();
-  const mode = (() => {
-    const s = modeRaw.toLowerCase();
-    if (!s) return "";
-    if (s.includes("aere") || s === "air") return "Aérea";
-    if (s.includes("marit") || s === "sea") return "Marítima";
-    return modeRaw;
-  })();
-  const left = [name, variety].filter(Boolean).join(" ");
-  return [left, mode].filter(Boolean).join(" · ") || "—";
-}
-
-export default function ShipmentDetailPage() {
+export default function ClientShipmentDetail() {
   const { id } = useParams(); 
   const navigate = useNavigate();
+  const { lang } = useUILang();
+
   const [data, setData] = useState<ShipmentDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activePhotoIdx, setActivePhotoIdx] = useState(0);
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [activeSection, setActiveSection] = useState<'overview' | 'docs' | 'photos' | 'timeline'>('overview');
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (!data?.photos || data.photos.length <= 1) return;
-      if (e.key === "ArrowRight") setActivePhotoIdx((prev) => (prev + 1) % data.photos.length);
-      else if (e.key === "ArrowLeft") setActivePhotoIdx((prev) => (prev - 1 + data.photos.length) % data.photos.length);
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [data?.photos]);
+  const DOC_TYPES = useMemo(() => [
+    { v: "invoice", l: lang === 'es' ? "Factura Comercial" : "Commercial Invoice" },
+    { v: "packing_list", l: lang === 'es' ? "Packing list" : "Packing List" },
+    { v: "awb", l: lang === 'es' ? "AWB / BL" : "AWB / BL" },
+    { v: "phytosanitary", l: lang === 'es' ? "Cert. Fitosanitario" : "Phytosanitary Cert." },
+    { v: "eur1", l: lang === 'es' ? "Certificado EUR1" : "EUR1 Certificate" },
+    { v: "export_declaration", l: lang === 'es' ? "Decl. Exportación" : "Export Declaration" },
+    { v: "quality_report", l: lang === 'es' ? "Informe de Calidad" : "Quality Report" },
+  ], [lang]);
 
-  async function load(shipmentId: string) {
+  const STEPS = useMemo(() => [
+    { type: "CREATED", label: lang === 'es' ? "Origen" : "Origin" },
+    { type: "PACKED", label: lang === 'es' ? "Empaque" : "Packed" },
+    { type: "DOCS_READY", label: lang === 'es' ? "Docs" : "Docs" },
+    { type: "AT_ORIGIN", label: lang === 'es' ? "Terminal" : "Terminal" },
+    { type: "IN_TRANSIT", label: lang === 'es' ? "Tránsito" : "In Transit" },
+    { type: "AT_DESTINATION", label: lang === 'es' ? "Destino" : "Destination" },
+  ], [lang]);
+  
+  const CHAIN = ["CREATED", "PACKED", "DOCS_READY", "AT_ORIGIN", "IN_TRANSIT", "AT_DESTINATION"];
+
+  const labelStatus = (status: string) => {
+    const s = status?.toLowerCase() || '';
+    switch(s) {
+      case 'created': return lang === 'es' ? 'CREADO' : 'CREATED';
+      case 'packed': return lang === 'es' ? 'EMPACADO' : 'PACKED';
+      case 'docs_ready': return lang === 'es' ? 'DOCUMENTACIÓN LISTA' : 'DOCS READY';
+      case 'at_origin': return lang === 'es' ? 'EN TERMINAL DE ORIGEN' : 'AT ORIGIN TERMINAL';
+      case 'in_transit': return lang === 'es' ? 'EN TRÁNSITO' : 'IN TRANSIT';
+      case 'at_destination': return lang === 'es' ? 'EN DESTINO' : 'ARRIVED AT DESTINATION';
+      case 'delivered': return lang === 'es' ? 'ENTREGADO' : 'DELIVERED';
+      default: return s.toUpperCase();
+    }
+  };
+
+  const load = useCallback(async (shipmentId: string) => {
     setLoading(true);
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (!token) { navigate("/login"); return; }
-      const res = await fetch(`${getApiBase()}/.netlify/functions/getShipment?id=${encodeURIComponent(shipmentId)}`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { navigate('/login'); return; }
+      
+      const res = await fetch(`${getApiBase()}/.netlify/functions/getShipment?id=${shipmentId}`, {
+        headers: { Authorization: `Bearer ${session.access_token}` }
       });
-      if (!res.ok) throw new Error("Error cargando embarque");
+      if (!res.ok) throw new Error("Fetch error");
       const json = await res.json();
       setData(json);
-    } catch (e) { console.error("Error en load:", e); } finally { setLoading(false); }
-  }
+    } catch (e) {
+      console.error("Error loading shipment details:", e);
+    } finally {
+      setLoading(false);
+    }
+  }, [navigate]);
 
-  useEffect(() => { if (id) load(id); }, [id]);
+  useEffect(() => { if (id) load(id); }, [id, load]);
 
-  // FUNCIÓN 1: PREVISUALIZACIÓN (Abrir URL de Supabase directamente)
-  async function handleView(fileId: string) {
-    const { data: sessionData } = await supabase.auth.getSession();
-    const token = sessionData.session?.access_token;
-    const res = await fetch(`${getApiBase()}/.netlify/functions/getDownloadUrl?fileId=${encodeURIComponent(fileId)}`, {
-        headers: { Authorization: `Bearer ${token}` }
-    });
-    const { url } = await res.json();
-    window.open(url, "_blank");
-  }
+  const timelineItems = useMemo(() => {
+    if (!data?.milestones) return [];
+    return data.milestones.map((m) => ({
+      id: m.id,
+      type: m.type,
+      created_at: m.at,
+      note: m.note,
+      author_name: "Fresh Food Panamá" 
+    }));
+  }, [data?.milestones]);
 
-  // FUNCIÓN 2: DESCARGA REAL (Fetch a Blob para forzar descarga)
-  async function handleDownload(fileId: string, filename: string) {
-    setDownloadingId(fileId);
+  async function download(fileId: string) {
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      const res = await fetch(`${getApiBase()}/.netlify/functions/getDownloadUrl?fileId=${encodeURIComponent(fileId)}`, {
-          headers: { Authorization: `Bearer ${token}` }
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(`${getApiBase()}/.netlify/functions/getDownloadUrl?fileId=${fileId}`, {
+        headers: { Authorization: `Bearer ${session?.access_token}` }
       });
       const { url } = await res.json();
-      
-      const fileRes = await fetch(url);
-      const blob = await fileRes.blob();
-      const downloadUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = downloadUrl;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(downloadUrl);
-    } catch (e) {
-      console.error("Error downloading file:", e);
-    } finally {
-      setDownloadingId(null);
+      window.open(url, "_blank");
+    } catch (error) {
+      console.error("Error downloading file:", error);
+      alert(lang === 'es' ? "Error al descargar el archivo." : "Error downloading file.");
     }
   }
 
-  const docCount = useMemo(() => {
-    if (!data?.documents) return 0;
-    const uniqueUploadedTypes = new Set(
-      data.documents
-        .filter(d => d.doc_type && Object.keys(DOC_LABELS).includes(d.doc_type))
-        .map(d => d.doc_type)
-    );
-    return uniqueUploadedTypes.size;
-  }, [data?.documents]);
+  // Calcular índice actual para la barra de progreso
+  const currentStepIndex = CHAIN.indexOf(data?.status || 'CREATED');
+  const progressPct = Math.max(0, (currentStepIndex / (STEPS.length - 1)) * 100);
 
-  if (loading) return <ClientLayout title="Cargando..."><div className="ff-loader-view">Sincronizando expediente...</div></ClientLayout>;
+  if (loading) return (
+    <ClientLayout title={lang === 'es' ? "Detalle del Embarque" : "Shipment Details"}>
+      <div className="loader-full">
+        <Loader2 className="animate-spin text-brand" size={40}/>
+        <p className="ff-sync-text">{lang === 'es' ? 'Cargando expediente...' : 'Loading dossier...'}</p>
+      </div>
+    </ClientLayout>
+  );
 
   return (
-    <ClientLayout title="Expediente Logístico" subtitle="Gestión de carga y documentación" wide>
-      <div className="ff-detail-container">
-        <div className="ff-nav-breadcrumb">
-          <Link to="/clients/shipments" className="ff-back-link">
-            <ArrowLeft size={14} /> Volver al listado
-          </Link>
-        </div>
-
-        {data && (
-          <div className="ff-detail-content">
-            <header className="ff-header-premium">
-              <div className="ff-header-main-info">
-                <div className="ff-id-badge">
-                  <Package size={14} />
-                  <span>REF: {data.code}</span>
-                </div>
-                <h1 className="ff-product-name">{productLine(data)}</h1>
-                <div className="ff-client-tag">Consignatario: <strong>{clientNameLine(data)}</strong></div>
+    <ClientLayout title={lang === 'es' ? "Expediente de Carga" : "Cargo Dossier"} subtitle={data?.code}>
+      <div className="clean-container">
+        
+        {/* HEADER COMPACTO CORPORATIVO */}
+        <div className="clean-header">
+          <div className="ch-left">
+            <button onClick={() => navigate(-1)} className="btn-back-icon" title={lang === 'es' ? 'Volver' : 'Back'}><ArrowLeft size={18}/></button>
+            <div className="ch-titles">
+              <div className="title-row">
+                <h1 className="ch-title">{data?.code}</h1>
+                <span className="status-pill-main">{labelStatus(data!.status)}</span>
               </div>
-
-              <div className="ff-header-specs-bar">
-                <div className="ff-spec-item">
-                  <span className="ff-spec-label">DESTINO</span>
-                  <div className="ff-spec-value-group">
-                    <MapPin size={12} />
-                    <span className="ff-spec-value">{data.destination}</span>
-                  </div>
-                </div>
-                <div className="ff-spec-divider"></div>
-                <div className="ff-spec-item">
-                  <span className="ff-spec-label">INCOTERM</span>
-                  <span className="ff-spec-value text-green">{data.incoterm || 'FOB'}</span>
-                </div>
-                <div className="ff-spec-divider-heavy"></div>
-                <div className="ff-spec-item">
-                  <span className="ff-spec-label">CAJAS / PLTS</span>
-                  <span className="ff-spec-value">{data.boxes || '0'} / {data.pallets || '0'}</span>
-                </div>
-              </div>
-            </header>
-
-            <section className="ff-section-card ff-stepper-section">
-              <ProgressStepper 
-                milestones={data.milestones ?? []} 
-                flightNumber={data.flight_number ?? null} 
-                awb={data.awb ?? null}
-                flightStatus={data.flight_status}
-                departureTime={data.flight_departure_time}
-                arrivalTime={data.flight_arrival_time}
-              />
-            </section>
-
-            <div className="ff-grid-50-50">
-              {/* REPORTE FOTOGRÁFICO */}
-              <section className="ff-section-card no-padding overflow-hidden">
-                <div className="ff-card-header-inner">
-                  <div className="header-icon orange"><ImageIcon size={18} /></div>
-                  <h3>Reporte Fotográfico</h3>
-                </div>
-                
-                <div className="ff-gallery-box">
-                  {data?.photos && data.photos.length > 0 ? (
-                    <>
-                      <div className="ff-main-photo-wrapper" onClick={() => handleView(data.photos[activePhotoIdx]?.id)}>
-                         <img src={data.photos[activePhotoIdx]?.url || ''} alt="Inspección" />
-                         <div className="ff-photo-counter">{activePhotoIdx + 1} / {data.photos.length}</div>
-                      </div>
-                      <div className="ff-thumbs-strip">
-                        {data.photos.map((p, idx) => (
-                          <div key={p.id || idx} className={`ff-thumb ${idx === activePhotoIdx ? 'active' : ''}`} onClick={() => setActivePhotoIdx(idx)}>
-                            <img src={p.url || ''} alt="thumb" />
-                          </div>
-                        ))}
-                      </div>
-                    </>
-                  ) : (
-                    <div className="ff-no-photos-placeholder"><p>Cargando inspección...</p></div>
-                  )}
-                </div>
-              </section>
-
-              {/* REPOSITORIO DOCUMENTAL */}
-              <section className="ff-section-card no-padding overflow-hidden">
-                <div className="ff-card-header-inner spread">
-                  <div className="ff-header-group">
-                    <div className="header-icon dark"><FileCheck size={18} /></div>
-                    <h3>Documentación</h3>
-                  </div>
-                  <div className="doc-counter-pro">
-                    <span>{docCount}</span><span className="total">/10</span>
-                  </div>
-                </div>
-
-                <div className="ff-fm-compact-list">
-                  {Object.entries(DOC_LABELS).map(([key, label]) => {
-                    const doc = data.documents?.find(d => d.doc_type === key);
-                    const isUp = !!doc;
-                    return (
-                      <div key={key} className={`ff-fm-row ${isUp ? 'is-up' : 'is-off'}`}>
-                        <div className="ff-fm-name">
-                          <FileText size={14} className="ff-fm-icon" />
-                          <span>{label}</span>
-                        </div>
-                        
-                        <div className="ff-fm-actions">
-                          {isUp ? (
-                            <div className="ff-btn-group">
-                              <button className="ff-action-btn view" onClick={() => handleView(doc.id)} title="Previsualizar">
-                                <ExternalLink size={13} />
-                              </button>
-                              <button 
-                                className="ff-action-btn download" 
-                                onClick={() => handleDownload(doc.id, doc.filename)} 
-                                disabled={downloadingId === doc.id}
-                                title="Descargar"
-                              >
-                                {downloadingId === doc.id ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
-                              </button>
-                            </div>
-                          ) : (
-                            <span className="ff-fm-status">Pendiente</span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
+              <p className="ch-sub">
+                <strong>{data?.product_name}</strong> {data?.product_variety ? `(${data.product_variety})` : ''}
+              </p>
             </div>
           </div>
-        )}
+          <div className="ch-right">
+            <div className="ch-stats">
+              <div className="stat-block"><span className="s-val">{data?.boxes || 0}</span><span className="s-lab">{lang === 'es' ? 'Cajas' : 'Boxes'}</span></div>
+              <div className="stat-block"><span className="s-val">{data?.pallets || 0}</span><span className="s-lab">Pallets</span></div>
+              <div className="stat-block"><span className="s-val">{(data?.weight_kg || 0).toLocaleString()} <small>Kg</small></span><span className="s-lab">{lang === 'es' ? 'Peso Bruto' : 'Gross WGT'}</span></div>
+            </div>
+          </div>
+        </div>
+
+        {/* LAYOUT VERTICAL TABS */}
+        <div className="clean-layout">
+          
+          <aside className="clean-sidebar">
+            <nav className="side-nav">
+              <button className={`nav-item ${activeSection === 'overview' ? 'active' : ''}`} onClick={() => setActiveSection('overview')}>
+                <MapPin size={16}/> {lang === 'es' ? 'Resumen Operativo' : 'Operations Overview'}
+              </button>
+              <button className={`nav-item ${activeSection === 'docs' ? 'active' : ''}`} onClick={() => setActiveSection('docs')}>
+                <FileText size={16}/> {lang === 'es' ? 'Documentación' : 'Documentation'}
+              </button>
+              <button className={`nav-item ${activeSection === 'photos' ? 'active' : ''}`} onClick={() => setActiveSection('photos')}>
+                <ImageIcon size={16}/> {lang === 'es' ? 'Evidencia Visual' : 'Visual Evidence'}
+              </button>
+              <button className={`nav-item ${activeSection === 'timeline' ? 'active' : ''}`} onClick={() => setActiveSection('timeline')}>
+                <Clock size={16}/> {lang === 'es' ? 'Línea de Tiempo' : 'Timeline'}
+              </button>
+            </nav>
+          </aside>
+
+          <main className="clean-content">
+            
+            {/* --- SECCIÓN 1: RESUMEN OPERATIVO --- */}
+            {activeSection === 'overview' && (
+              <div className="section-panel no-padding">
+                <div className="panel-header pad-24"><h2>{lang === 'es' ? 'Estado Logístico' : 'Logistics Status'}</h2></div>
+                
+                {/* SAAS PROGRESS STEPPER (Rediseñado) */}
+                <div className="saas-stepper-wrapper">
+                  <div className="saas-stepper-track-bg"></div>
+                  <div className="saas-stepper-track-fill" style={{ width: `${progressPct}%` }}></div>
+                  
+                  <div className="saas-stepper-nodes">
+                    {STEPS.map((stepObj, idx) => {
+                      const stepId = CHAIN[idx];
+                      const isPassed = currentStepIndex > idx;
+                      const isCurrent = currentStepIndex === idx;
+                      const isFirst = idx === 0;
+                      const isLast = idx === STEPS.length - 1;
+
+                      const milestoneData = data?.milestones?.find(m => m.type === stepId);
+
+                      return (
+                        <div className={`saas-node ${isPassed ? 'passed' : ''} ${isCurrent ? 'current' : ''}`} key={stepId}>
+                          
+                          <div className="ff-tooltip-wrapper tooltip-trigger">
+                            <div className="node-circle">
+                              {isPassed ? <Check size={14} strokeWidth={3}/> : <div className="node-dot"></div>}
+                            </div>
+                            
+                            {/* HOVER TOOLTIP CORPORATIVO */}
+                            {milestoneData && (
+                              <div className="ff-tooltip-content loc-tooltip step-tooltip">
+                                <div className="tt-header">
+                                  <strong>{stepObj.label}</strong>
+                                  <span className="tt-time">{new Date(milestoneData.at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                </div>
+                                {milestoneData.note && (
+                                  <div className="tt-note">
+                                    <MessageSquare size={12} className="tt-icon-note"/> 
+                                    <span>"{milestoneData.note}"</span>
+                                  </div>
+                                )}
+                                <div className="tt-author">Verified by FreshConnect</div>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="node-labels">
+                            <span className="n-title">{stepObj.label}</span>
+                            {/* Píldoras integradas al texto, sin position absolute */}
+                            {isFirst && <span className="n-pill origin"><MapPin size={10}/> {data?.origin || 'PTY'}</span>}
+                            {isLast && <span className="n-pill dest"><Globe size={10}/> {data?.destination || 'TBD'}</span>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* RESUMEN DE DATOS COMPACTO */}
+                <div className="compact-data-grid">
+                  
+                  {/* Bloque 1: Producto y Calidad */}
+                  <div className="data-block">
+                    <div className="db-header"><Package size={14}/> <span>{lang === 'es' ? 'Calidad' : 'Quality'}</span></div>
+                    <div className="db-content">
+                      <div className="field-group">
+                        <span className="f-lbl">{lang === 'es' ? 'Producto' : 'Product'}</span>
+                        <span className="f-val">{data?.product_name || '—'} {data?.product_variety ? `(${data.product_variety})` : ''}</span>
+                      </div>
+                      <div className="field-row">
+                        <div className="field-group">
+                          <span className="f-lbl">{lang === 'es' ? 'Calibre' : 'Caliber'}</span>
+                          <span className="f-val">{data?.calibre || '—'}</span>
+                        </div>
+                        <div className="field-group">
+                          <span className="f-lbl">Color / Brix</span>
+                          <span className="f-val">{data?.color ? `${data.color} / ${data?.brix_grade || '-'}` : (data?.brix_grade || '—')}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Bloque 2: Volumen */}
+                  <div className="data-block">
+                    <div className="db-header"><Scale size={14}/> <span>{lang === 'es' ? 'Volumen' : 'Volume'}</span></div>
+                    <div className="db-content">
+                      <div className="field-row">
+                        <div className="field-group">
+                          <span className="f-lbl">{lang === 'es' ? 'Cajas' : 'Boxes'}</span>
+                          <span className="f-val">{data?.boxes || 0}</span>
+                        </div>
+                        <div className="field-group">
+                          <span className="f-lbl">Pallets</span>
+                          <span className="f-val">{data?.pallets || 0}</span>
+                        </div>
+                      </div>
+                      <div className="field-group">
+                        <span className="f-lbl">{lang === 'es' ? 'Peso Bruto' : 'Gross Wgt'}</span>
+                        <span className="f-val">{(data?.weight_kg || 0).toLocaleString()} Kg</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Bloque 3: Transporte */}
+                  <div className="data-block no-border">
+                    <div className="db-header">
+                       {data?.product_mode?.toUpperCase() === 'AIR' ? <Plane size={14}/> : <Ship size={14}/>} 
+                       <span>{lang === 'es' ? 'Transporte' : 'Transport'}</span>
+                    </div>
+                    <div className="db-content">
+                      <div className="field-group">
+                        <span className="f-lbl">{lang === 'es' ? 'Vuelo / Viaje' : 'Flight / Voyage'}</span>
+                        <span className="f-val font-mono text-brand">{data?.flight_number || (lang === 'es' ? 'Pendiente' : 'Pending')}</span>
+                      </div>
+                      <div className="field-group">
+                        <span className="f-lbl">AWB / BL / Tracking</span>
+                        <span className="f-val font-mono">{data?.awb || (lang === 'es' ? 'Pendiente' : 'Pending')}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            )}
+
+            {/* RESTO DE SECCIONES (Docs, Photos, Timeline) SE MANTIENEN IGUAL */}
+            {activeSection === 'docs' && (
+              <div className="section-panel no-padding">
+                <div className="panel-header pad-24">
+                   <h2>{lang === 'es' ? 'Documentos Comerciales y Legales' : 'Commercial & Legal Documents'}</h2>
+                </div>
+                <table className="clean-table">
+                  <thead>
+                    <tr>
+                      <th style={{width: '50%'}}>{lang === 'es' ? 'Tipo de Documento' : 'Document Type'}</th>
+                      <th style={{width: '30%'}}>{lang === 'es' ? 'Estado' : 'Status'}</th>
+                      <th style={{width: '20%'}} className="txt-right">{lang === 'es' ? 'Acciones' : 'Actions'}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {DOC_TYPES.map(t => {
+                      const doc = data?.documents?.find(d => d.doc_type === t.v);
+                      return (
+                        <tr key={t.v}>
+                          <td className="doc-type-label"><FileText size={14} className="text-slate-400"/> {t.l}</td>
+                          <td>
+                            {doc ? (
+                               <span className="doc-name-pill">{doc.filename}</span> 
+                            ) : (
+                               <span className="empty-italic">{lang === 'es' ? 'Pendiente de emisión' : 'Pending emission'}</span>
+                            )}
+                          </td>
+                          <td className="txt-right">
+                            {doc ? (
+                              <button className="btn-icon" onClick={() => download(doc.id)} title={lang === 'es' ? 'Descargar' : 'Download'}><Download size={14}/></button>
+                            ) : (
+                              <span className="empty-italic">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {activeSection === 'photos' && (
+              <div className="section-panel">
+                <div className="panel-header">
+                  <h2>{lang === 'es' ? 'Reporte Fotográfico' : 'Photographic Report'}</h2>
+                </div>
+                
+                <div className="pad-32">
+                  {data?.photos && data.photos.length > 0 ? (
+                    <div className="photos-grid">
+                      {data.photos.map(p => (
+                        <div key={p.id} className="photo-card">
+                          <img src={p.url || ""} alt="Evidencia" className="photo-img" />
+                          <div className="photo-overlay">
+                            <button onClick={() => download(p.id)} title={lang === 'es' ? 'Descargar original' : 'Download original'}>
+                               <Download size={18}/>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="empty-box">
+                      <ImageIcon size={32} color="#cbd5e1" />
+                      <p>{lang === 'es' ? 'Las fotografías de la carga estarán disponibles pronto.' : 'Cargo photographs will be available soon.'}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {activeSection === 'timeline' && (
+              <div className="section-panel">
+                <div className="panel-header"><h2>{lang === 'es' ? 'Registro Histórico (Trazabilidad)' : 'Historical Log (Traceability)'}</h2></div>
+                <div className="pad-32">
+                  {timelineItems.length > 0 ? (
+                     <ModernTimeline milestones={timelineItems as any} />
+                  ) : (
+                     <div className="empty-box">
+                        <Clock size={32} color="#cbd5e1" />
+                        <p>{lang === 'es' ? 'El registro de actividad iniciará una vez la carga sea procesada.' : 'Activity log will begin once the cargo is processed.'}</p>
+                     </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+          </main>
+        </div>
       </div>
 
       <style dangerouslySetInnerHTML={{ __html: `
-        .ff-detail-container { 
-          max-width: 1200px; 
-          margin: 0 auto; 
-          padding: 0 40px 40px; 
-          box-sizing: border-box; 
-        }
-        .ff-nav-breadcrumb { margin-top: 25px; margin-bottom: 20px; }
-        .ff-back-link { 
-          display: inline-flex; align-items: center; gap: 6px; 
-          color: #64748b; font-size: 13px; font-weight: 700; 
-          text-decoration: none; transition: 0.2s;
-        }
-        .ff-back-link:hover { color: #284b2c; transform: translateX(-2px); }
+        /* VARIABLES Y RESET */
+        .clean-container { max-width: 1100px; margin: 0 auto; font-family: 'Poppins', sans-serif; color: #0f172a; }
+        .text-brand { color: var(--ff-green-dark); }
         
-        .ff-detail-content { display: flex; flex-direction: column; gap: 24px; }
-        .ff-section-card { background: white; border-radius: 16px; border: 1px solid #eef2f6; padding: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.02); }
-        .ff-section-card.no-padding { padding: 0; }
-
-        .ff-card-header-inner { padding: 18px 24px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #f8fafc; }
-        .ff-card-header-inner.spread { justify-content: space-between; }
-        .ff-card-header-inner h3 { font-size: 14px; font-weight: 800; color: #0f172a; margin: 0; text-transform: uppercase; letter-spacing: 0.02em; }
-
-        .ff-grid-50-50 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: stretch; }
-
-        .ff-header-premium { background: white; padding: 25px 30px; border-radius: 20px; border: 1px solid #eef2f6; display: flex; align-items: center; justify-content: space-between; }
-        .ff-id-badge { display: inline-flex; align-items: center; gap: 6px; background: #f0fdf4; color: #166534; padding: 4px 10px; border-radius: 6px; font-family: monospace; font-weight: 700; font-size: 12px; margin-bottom: 8px; }
-        .ff-product-name { font-size: 22px; font-weight: 800; color: #0f172a; margin: 0; line-height: 1.1; }
-        .ff-client-tag { color: #64748b; margin-top: 4px; font-size: 13px; }
-
-        .ff-header-specs-bar { display: flex; align-items: center; gap: 20px; background: #f8fafc; padding: 12px 20px; border-radius: 12px; border: 1px solid #f1f5f9; }
-        .ff-spec-item { display: flex; flex-direction: column; gap: 2px; }
-        .ff-spec-label { font-size: 8px; font-weight: 800; color: #94a3b8; text-transform: uppercase; }
-        .ff-spec-value { font-size: 13px; font-weight: 700; color: #1e293b; }
-        .ff-spec-divider { width: 1px; height: 24px; background: #e2e8f0; }
-
-        .ff-gallery-box { padding: 20px; }
-        .ff-main-photo-wrapper { width: 100%; aspect-ratio: 16/9; background: #f8fafc; border-radius: 12px; overflow: hidden; margin-bottom: 12px; position: relative; border: 1px solid #f1f5f9; cursor: zoom-in; }
-        .ff-main-photo-wrapper img { width: 100%; height: 100%; object-fit: contain; }
-        .ff-photo-counter { position: absolute; bottom: 10px; right: 10px; background: rgba(15, 23, 42, 0.8); color: white; padding: 3px 8px; border-radius: 10px; font-size: 10px; font-weight: 700; }
-        .ff-thumbs-strip { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
-        .ff-thumb { width: 50px; height: 50px; border-radius: 6px; cursor: pointer; border: 2px solid transparent; flex-shrink: 0; transition: 0.2s; }
-        .ff-thumb.active { border-color: #284b2c; transform: translateY(-2px); }
-        .ff-thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 4px; }
-
-        .ff-fm-compact-list { padding: 10px 20px 20px; }
-        .ff-fm-row { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; border-bottom: 1px solid #f8fafc; transition: 0.2s; border-radius: 6px; }
-        .ff-fm-row.is-off { opacity: 0.5; }
-        .ff-fm-row:hover { background: #f8fafc; }
-        .ff-fm-name { display: flex; align-items: center; gap: 10px; font-size: 12px; font-weight: 600; color: #1e293b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .ff-fm-icon { color: #94a3b8; flex-shrink: 0; }
-        .is-up .ff-fm-icon { color: #284b2c; }
+        /* HEADER COMPACTO */
+        .clean-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid rgba(34, 76, 34, 0.1); }
+        .ch-left { display: flex; align-items: center; gap: 16px; }
+        .btn-back-icon { background: white; border: 1px solid rgba(34, 76, 34, 0.15); width: 36px; height: 36px; border-radius: 10px; color: var(--ff-green-dark); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: 0.2s; flex-shrink: 0; box-shadow: 0 2px 5px rgba(0,0,0,0.02);}
+        .btn-back-icon:hover { border-color: var(--ff-green); background: #f9fbf9; transform: translateY(-1px);}
         
-        .ff-btn-group { display: flex; gap: 4px; }
-        .ff-action-btn { width: 26px; height: 26px; border-radius: 6px; border: 1px solid #e2e8f0; background: white; color: #64748b; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
-        .ff-action-btn:hover { border-color: #284b2c; color: #284b2c; background: #f0fdf4; }
-        .ff-action-btn.view:hover { border-color: #0284c7; color: #0284c7; background: #f0f9ff; }
-        .ff-fm-status { font-size: 10px; color: #94a3b8; font-weight: 700; text-transform: uppercase; padding-right: 5px; }
+        .ch-titles { display: flex; flex-direction: column; gap: 4px; }
+        .title-row { display: flex; align-items: center; gap: 12px; }
+        .ch-title { font-family: 'JetBrains Mono', monospace; font-size: 24px; font-weight: 900; margin: 0; color: var(--ff-green-dark); letter-spacing: -0.5px; }
+        .status-pill-main { background: var(--ff-green-dark); color: white; padding: 4px 12px; border-radius: 20px; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; }
+        .ch-sub { font-size: 13px; color: var(--ff-green-dark); opacity: 0.7; margin: 0; }
+        .ch-sub strong { color: var(--ff-green-dark); font-weight: 700; opacity: 1; }
+        
+        .ch-right { display: flex; align-items: center; gap: 24px; }
+        .ch-stats { display: flex; gap: 24px; }
+        .stat-block { display: flex; flex-direction: column; align-items: flex-end; }
+        .s-val { font-size: 18px; font-weight: 800; color: var(--ff-green-dark); line-height: 1.1; font-variant-numeric: tabular-nums; }
+        .s-val small { font-size: 11px; opacity: 0.6; }
+        .s-lab { font-size: 10px; color: var(--ff-green-dark); opacity: 0.6; font-weight: 700; text-transform: uppercase; margin-top: 4px; }
 
-        .doc-counter-pro { display: flex; align-items: center; background: #0f172a; color: white; padding: 3px 10px; border-radius: 20px; font-weight: 800; font-size: 11px; }
-        .doc-counter-pro .total { opacity: 0.4; margin-left: 1px; }
+        /* LAYOUT SPLIT */
+        .clean-layout { display: grid; grid-template-columns: 220px 1fr; gap: 32px; align-items: start; }
+        
+        /* SIDEBAR */
+        .side-nav { display: flex; flex-direction: column; gap: 6px; position: sticky; top: 20px; }
+        .nav-item { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 12px; border: none; background: transparent; font-size: 13px; font-weight: 600; color: var(--ff-green-dark); opacity: 0.7; cursor: pointer; text-align: left; transition: 0.2s; }
+        .nav-item:hover { background: rgba(34, 76, 34, 0.05); opacity: 1; }
+        .nav-item.active { background: white; border: 1px solid rgba(34, 76, 34, 0.1); opacity: 1; box-shadow: 0 4px 10px rgba(0,0,0,0.02); }
 
-        .header-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
-        .header-icon.orange { background: #fff7ed; color: #ea580c; }
-        .header-icon.dark { background: #f1f5f9; color: #0f172a; }
+        /* PANEL BLANCO DE CONTENIDO - Se eliminó overflow: hidden para arreglar el Tooltip */
+        .clean-content { background: white; border-radius: 20px; border: 1px solid rgba(34, 76, 34, 0.08); box-shadow: 0 4px 20px rgba(34, 76, 34, 0.03); min-height: 400px; }
+        .section-panel { display: flex; flex-direction: column; }
+        .section-panel.no-padding { padding: 0; }
+        .panel-header { display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; border-bottom: 1px solid rgba(34, 76, 34, 0.05); background: #f9fbf9; border-radius: 20px 20px 0 0;}
+        .pad-24 { padding: 20px 24px; }
+        .pad-32 { padding: 24px 32px; }
+        .panel-header h2 { font-size: 14px; font-weight: 800; color: var(--ff-green-dark); margin: 0; text-transform: uppercase; letter-spacing: 0.3px; }
 
-        @media (max-width: 1100px) { 
-          .ff-grid-50-50 { grid-template-columns: 1fr; } 
-          .ff-detail-container { padding: 0 20px 20px; }
+        /* ================= SAAS PROGRESS STEPPER (NUEVO DISEÑO) ================= */
+        .saas-stepper-wrapper { position: relative; padding: 50px 40px 30px 40px; background: white; border-bottom: 1px dashed rgba(34, 76, 34, 0.15); }
+        .saas-stepper-track-bg { position: absolute; top: 68px; left: 60px; right: 60px; height: 4px; background: rgba(34, 76, 34, 0.08); border-radius: 2px; z-index: 1; }
+        .saas-stepper-track-fill { position: absolute; top: 68px; left: 60px; height: 4px; background: var(--ff-green); border-radius: 2px; z-index: 2; transition: width 1s cubic-bezier(0.4, 0, 0.2, 1); }
+        
+        .saas-stepper-nodes { display: flex; justify-content: space-between; position: relative; z-index: 10; }
+        .saas-node { display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100px; }
+        
+        .node-circle { width: 36px; height: 36px; border-radius: 50%; background: white; border: 3px solid #e2e8f0; display: flex; align-items: center; justify-content: center; transition: all 0.4s ease; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        .node-dot { width: 10px; height: 10px; background: #e2e8f0; border-radius: 50%; transition: all 0.4s ease; }
+        
+        /* Estados del Nodo */
+        .saas-node.passed .node-circle { background: var(--ff-green); border-color: var(--ff-green); color: white; }
+        .saas-node.current .node-circle { border-color: var(--ff-green); animation: pulse-ring 2s infinite; }
+        .saas-node.current .node-dot { background: var(--ff-green); }
+        
+        @keyframes pulse-ring { 
+          0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.3); } 
+          70% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); } 
+          100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); } 
         }
+
+        /* Textos del Nodo */
+        .node-labels { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+        .n-title { font-size: 11px; font-weight: 800; color: var(--ff-green-dark); opacity: 0.5; text-transform: uppercase; transition: 0.3s; }
+        .saas-node.passed .n-title { opacity: 0.9; }
+        .saas-node.current .n-title { opacity: 1; font-weight: 900; color: var(--ff-green); }
+
+        .n-pill { font-size: 10px; font-weight: 800; padding: 3px 8px; border-radius: 6px; display: flex; align-items: center; gap: 4px; font-family: 'JetBrains Mono', monospace; }
+        .n-pill.origin { background: rgba(34, 76, 34, 0.06); color: var(--ff-green-dark); }
+        .n-pill.dest { background: #ecfdf5; color: #10b981; border: 1px solid #a7f3d0; }
+
+        /* TOOLTIP CORPORATIVO */
+        .ff-tooltip-wrapper { position: relative; cursor: pointer; display: flex; justify-content: center; }
+        .ff-tooltip-content {
+          position: absolute; bottom: 140%; left: 50%; transform: translateX(-50%) translateY(10px);
+          background: var(--ff-green-dark); color: white; padding: 16px; border-radius: 12px;
+          z-index: 9999; opacity: 0; visibility: hidden; pointer-events: none; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+          box-shadow: 0 10px 30px -5px rgba(0,0,0,0.3); min-width: 220px; display: flex; flex-direction: column; gap: 8px;
+        }
+        .ff-tooltip-content::after {
+          content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+          border-width: 6px; border-style: solid; border-color: var(--ff-green-dark) transparent transparent transparent;
+        }
+        .ff-tooltip-wrapper:hover .ff-tooltip-content { opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0); }
+        
+        .tt-header { display: flex; justify-content: space-between; align-items: center; font-size: 12px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px;}
+        .tt-header strong { font-weight: 800; text-transform: uppercase; color: var(--ff-green);}
+        .tt-time { font-family: 'JetBrains Mono', monospace; color: #cbd5e1;}
+        .tt-note { font-size: 12px; font-weight: 500; color: white; opacity: 0.9; display: flex; gap: 8px; align-items: flex-start; line-height: 1.4;}
+        .tt-icon-note { flex-shrink: 0; margin-top: 2px; color: var(--ff-green); }
+        .tt-author { font-size: 10px; text-align: right; color: #94a3b8; margin-top: 4px; font-weight: 600;}
+
+        /* DATA GRID COMPACTO */
+        .compact-data-grid { display: grid; grid-template-columns: repeat(3, 1fr); padding: 24px; }
+        .data-block { display: flex; flex-direction: column; gap: 16px; padding: 0 24px; border-right: 1px solid rgba(34, 76, 34, 0.08); }
+        .data-block.no-border { border-right: none; }
+        .db-header { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 800; color: var(--ff-green-dark); text-transform: uppercase; letter-spacing: 0.5px;}
+        
+        .db-content { display: flex; flex-direction: column; gap: 16px; }
+        .field-group { display: flex; flex-direction: column; gap: 2px; }
+        .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        
+        .f-lbl { font-size: 10px; font-weight: 700; color: var(--ff-green-dark); opacity: 0.5; text-transform: uppercase; }
+        .f-val { font-size: 13px; font-weight: 700; color: var(--ff-green-dark); }
+        .font-mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; letter-spacing: -0.2px;}
+
+        /* TABLA DOCUMENTOS */
+        .clean-table { width: 100%; border-collapse: collapse; }
+        .clean-table th { text-align: left; padding: 16px 32px; font-size: 10px; font-weight: 800; color: var(--ff-green-dark); opacity: 0.6; text-transform: uppercase; border-bottom: 1px solid rgba(34, 76, 34, 0.08); background: #f9fbf9; }
+        .clean-table td { padding: 16px 32px; border-bottom: 1px solid rgba(34, 76, 34, 0.04); font-size: 13px; color: var(--ff-green-dark); font-weight: 600;}
+        .doc-type-label { display: flex; align-items: center; gap: 10px; }
+        .doc-name-pill { background: rgba(34, 76, 34, 0.05); padding: 6px 12px; border-radius: 8px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--ff-green-dark); border: 1px solid rgba(34, 76, 34, 0.08); }
+        .empty-italic { color: var(--ff-green-dark); opacity: 0.4; font-size: 12px; font-style: italic; }
+        .txt-right { text-align: right !important; }
+        
+        .btn-icon { background: white; border: 1px solid rgba(34, 76, 34, 0.15); width: 32px; height: 32px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: var(--ff-green-dark); transition: 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.02);}
+        .btn-icon:hover { border-color: var(--ff-green); background: #f9fbf9; transform: translateY(-1px); }
+
+        /* FOTOS */
+        .photos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 24px; }
+        .photo-card { position: relative; aspect-ratio: 1; border-radius: 16px; overflow: hidden; background: #f1f5f9; border: 1px solid rgba(34, 76, 34, 0.1); box-shadow: 0 4px 12px rgba(0,0,0,0.05); cursor: pointer; }
+        .photo-img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.5s ease; }
+        .photo-card:hover .photo-img { transform: scale(1.05); }
+        .photo-overlay { position: absolute; inset: 0; background: rgba(15,23,42,0.4); display: flex; gap: 8px; align-items: center; justify-content: center; opacity: 0; transition: 0.3s; backdrop-filter: blur(2px); }
+        .photo-card:hover .photo-overlay { opacity: 1; }
+        .photo-overlay button { background: white; border: none; width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--ff-green-dark); transition: 0.2s; }
+        .photo-overlay button:hover { transform: scale(1.1); color: var(--ff-green); }
+        
+        .empty-box { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 20px; color: var(--ff-green-dark); opacity: 0.6; text-align: center; gap: 16px; background: #f9fbf9; border-radius: 16px; border: 1px dashed rgba(34, 76, 34, 0.15); }
+        .empty-box p { margin: 0; font-size: 13px; font-weight: 600; }
+
+        /* LOADER Y TEXTOS SYNC */
+        .loader-full { height: calc(100vh - 80px); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
+        .ff-sync-text { font-size: 11px; font-weight: 800; color: var(--ff-green-dark); opacity: 0.6; text-transform: uppercase; letter-spacing: 2px; margin: 0;}
       ` }} />
     </ClientLayout>
   );

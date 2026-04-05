@@ -205,6 +205,25 @@ export default function ClientDetailPage() {
     </button>
   );
 
+  const handleUpdateNotificationPrefs = async (field: string, value: any) => {
+  setIsProcessingSec(true);
+  try {
+    const { error } = await supabase
+      .from('clients')
+      .update({ [field]: value })
+      .eq('id', id);
+
+    if (error) throw error;
+    
+    setClient({ ...client, [field]: value });
+    notify("Preferencia de notificación actualizada", "success");
+  } catch (e) {
+    notify("Error al actualizar preferencias", "error");
+  } finally {
+    setIsProcessingSec(false);
+  }
+};
+
   return (
     <AdminLayout title="Expediente Cliente">
       <div className="clean-container">
@@ -446,42 +465,92 @@ export default function ClientDetailPage() {
               </div>
             )}
 
-            {/* --- SECCIÓN: SEGURIDAD --- */}
-            {activeSection === 'security' && (
-              <div className="section-panel">
-                <div className="panel-header"><h2>Seguridad y Control de Acceso</h2></div>
-                <div className="pad-32">
-                  <div className="sec-alert">
-                    <Lock size={20} className="sec-icon"/>
-                    <div className="sec-txt">
-                      <h4>Cuenta de Usuario Portal</h4>
-                      <p>{userProfile ? `Vinculado al correo: ${userProfile.email}` : 'El cliente no tiene un usuario para iniciar sesión.'}</p>
-                    </div>
-                  </div>
-                  
-                  <div className="sec-actions-grid">
-                    <div className="sec-action-box">
-                      <h5>Estado de Acceso</h5>
-                      <p>Determina si el usuario puede iniciar sesión.</p>
-                      <button 
-                        className={`btn-sec-act ${client.has_platform_access ? 'danger' : 'success'}`} 
-                        onClick={handleToggleAccess} disabled={isProcessingSec}
-                      >
-                        {client.has_platform_access ? <><AlertTriangle size={14}/> Bloquear Acceso</> : <><Check size={14}/> Habilitar Acceso</>}
-                      </button>
-                    </div>
-                    
-                    <div className="sec-action-box">
-                      <h5>Credenciales</h5>
-                      <p>Enviar enlace oficial de recuperación de clave.</p>
-                      <button className="btn-sec-act neutral" onClick={handleResetPassword} disabled={isProcessingSec || !userProfile}>
-                        <KeyRound size={14}/> Reenviar Clave
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
+            {/* --- SECCIÓN: SEGURIDAD Y NOTIFICACIONES --- */}
+{activeSection === 'security' && (
+  <div className="section-panel">
+    <div className="panel-header"><h2>Seguridad y Control de Acceso</h2></div>
+    <div className="pad-32">
+      
+      {/* CONTROL DE ACCESO AL PORTAL */}
+      <div className="sec-alert">
+        <Lock size={20} className="sec-icon"/>
+        <div className="sec-txt">
+          <h4>Cuenta de Usuario Portal</h4>
+          <p>{userProfile ? `Vinculado al correo: ${userProfile.email}` : 'El cliente no tiene un usuario para iniciar sesión.'}</p>
+        </div>
+      </div>
+      
+      <div className="sec-actions-grid">
+        <div className="sec-action-box">
+          <h5>Estado de Acceso</h5>
+          <p>Determina si el usuario puede iniciar sesión en la plataforma.</p>
+          <button 
+            className={`btn-sec-act ${client.has_platform_access ? 'danger' : 'success'}`} 
+            onClick={handleToggleAccess} disabled={isProcessingSec}
+          >
+            {client.has_platform_access ? <><AlertTriangle size={14}/> Bloquear Acceso</> : <><Check size={14}/> Habilitar Acceso</>}
+          </button>
+        </div>
+        
+        <div className="sec-action-box">
+          <h5>Credenciales</h5>
+          <p>Enviar enlace oficial de recuperación de clave vía email.</p>
+          <button className="btn-sec-act neutral" onClick={handleResetPassword} disabled={isProcessingSec || !userProfile}>
+            <KeyRound size={14}/> Reenviar Clave
+          </button>
+        </div>
+      </div>
+
+      <div className="sec-divider" style={{ margin: '32px 0', borderBottom: '1px solid #e2e8f0' }} />
+
+      {/* NUEVA SECCIÓN: NOTIFICACIONES WHATSAPP */}
+      <div className="sec-alert" style={{ background: '#f0fdf4', borderColor: '#bbf7d0' }}>
+        <Bell size={20} style={{ color: '#16a34a' }}/>
+        <div className="sec-txt">
+          <h4 style={{ color: '#166534' }}>Notificaciones Transaccionales</h4>
+          <p style={{ color: '#15803d' }}>Gestione cómo el sistema notifica hitos críticos (Carga lista / Arribo) vía WhatsApp.</p>
+        </div>
+      </div>
+
+      <div className="sec-actions-grid">
+        <div className="sec-action-box">
+          <h5>Canal WhatsApp Business</h5>
+          <p>Habilitar el envío de mensajes PUSH automáticos.</p>
+          <div className="flex-between">
+            <span style={{ fontSize: '12px', fontWeight: 600, color: client.whatsapp_opt_in ? '#16a34a' : '#64748b' }}>
+              {client.whatsapp_opt_in ? 'Suscrito' : 'Desactivado'}
+            </span>
+            <label className="switch">
+              <input 
+                type="checkbox" 
+                checked={client.whatsapp_opt_in || false} 
+                onChange={(e) => handleUpdateNotificationPrefs('whatsapp_opt_in', e.target.checked)}
+                disabled={isProcessingSec}
+              />
+              <span className="slider round"></span>
+            </label>
+          </div>
+        </div>
+
+        <div className="sec-action-box">
+          <h5>Número Vinculado</h5>
+          <p>Número para alertas (Formato E.164: +507...)</p>
+          <div className="flex-copy-input">
+            <input 
+              type="text" 
+              className="sec-input-mono"
+              placeholder="+50700000000"
+              defaultValue={client.whatsapp_number || ''}
+              onBlur={(e) => handleUpdateNotificationPrefs('whatsapp_number', e.target.value)}
+              disabled={isProcessingSec}
+            />
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+)}
 
             {/* --- SECCIÓN: TRANSACCIONES UNIFICADAS --- */}
             {activeSection === 'history' && (
@@ -681,6 +750,27 @@ export default function ClientDetailPage() {
         .btn-save { background: #10b981; border: none; color: white; padding: 6px 20px; border-radius: 6px; font-weight: 700; font-size: 12px; cursor: pointer; }
 
         .loader-full { height: 100vh; display: flex; align-items: center; justify-content: center; color: #2563eb; }
+
+        /* SWITCH TOGGLE */
+.switch { position: relative; display: inline-block; width: 34px; height: 20px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; cursor: pointer; inset: 0; background-color: #cbd5e1; transition: .3s; border-radius: 20px; }
+.slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; }
+input:checked + .slider { background-color: #10b981; }
+input:checked + .slider:before { transform: translateX(14px); }
+
+.flex-between { display: flex; justify-content: space-between; align-items: center; }
+.flex-copy-input { display: flex; gap: 8px; margin-top: 4px; }
+.sec-input-mono { 
+  flex: 1; 
+  padding: 6px 10px; 
+  border: 1px solid #e2e8f0; 
+  border-radius: 6px; 
+  font-family: 'JetBrains Mono', monospace; 
+  font-size: 12px; 
+  background: #f8fafc;
+}
+.sec-input-mono:focus { border-color: #10b981; outline: none; background: white; }
       `}</style>
     </AdminLayout>
   );

@@ -4,12 +4,21 @@ import { supabase } from "../lib/supabaseClient";
 import { getApiBase } from "../lib/apiBase";
 import { useUILang } from "../lib/uiLanguage";
 import {
-  Package, Globe, ChevronDown, LogOut,
-  UserCircle2, ChevronLeft, ChevronRight, FileText, LayoutDashboard
+  Package, Globe, ChevronDown, LogOut, Search, Loader2,
+  UserCircle2, FileText, CheckCircle2, AlertCircle, ArrowRight, Ship, LayoutDashboard
 } from "lucide-react";
 
-const LOGO_SRC = "/brand/freshconnect_verde.svg";
-const LS_KEY = "ff_client_sidebar_collapsed";
+const LOGO_WHITE = "/brand/freshconnect_blanco.svg";
+
+export let notifyClient: (msg: string, type?: 'success' | 'error') => void = () => {};
+
+type SearchResult = { 
+  id: string; 
+  type: 'shipment' | 'quote'; 
+  label: string; 
+  sub: string;
+  status?: string; 
+};
 
 interface ClientLayoutProps {
   title?: string;
@@ -25,47 +34,76 @@ export function ClientLayout({ title, subtitle, children, wide = false }: Client
   
   const [me, setMe] = useState<{ email: string | null; role: string | null }>({ email: null, role: null });
   const [menuOpen, setMenuOpen] = useState(false);
-  const [sideCollapsed, setSideCollapsed] = useState(false);
+  const [toast, setToast] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
   
-  const menuRef = useRef<HTMLDivElement | null>(null);
+  // Buscador 360
+  const [globalQuery, setGlobalQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState(-1);
 
-  // --- NAVEGACIÓN RESTAURADA + DASHBOARD ---
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const searchRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  notifyClient = (msg, type = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 4000);
+  };
+
   const nav = useMemo(() => [
-    { 
-      href: "/clients/dashboard", 
-      label: lang === "es" ? "Panel de Control" : "Dashboard", 
-      icon: LayoutDashboard 
-    },
-    { 
-      href: "/clients/shipments", 
-      label: lang === "es" ? "Mis Embarques" : "My Shipments", 
-      icon: Package 
-    },
-    { 
-      href: "/clients/quotes", 
-      label: lang === "es" ? "Mis Cotizaciones" : "My Quotes", 
-      icon: FileText 
-    },
+    { href: "/clients/dashboard", label: lang === "es" ? "Panel de Control" : "Dashboard", icon: LayoutDashboard },
+    { href: "/clients/shipments", label: lang === "es" ? "Mis Embarques" : "My Shipments", icon: Package },
+    { href: "/clients/quotes", label: lang === "es" ? "Mis Cotizaciones" : "My Quotes", icon: FileText },
   ], [lang]);
 
+  const handleGlobalSearch = async (val: string) => {
+    setGlobalQuery(val);
+    if (val.length < 2) { setSearchResults([]); return; }
+    setIsSearching(true);
+    setSelectedIndex(-1);
+
+    try {
+      // Supabase RLS filtrará automáticamente para que solo devuelva los datos del cliente logueado
+      const [shipRes, quoteRes] = await Promise.all([
+        supabase.from('shipments').select('id, code, destination, status')
+          .or(`code.ilike.%${val}%,destination.ilike.%${val}%,awb.ilike.%${val}%`).limit(3),
+        supabase.from('quotes').select('id, quote_number, destination, status')
+          .or(`quote_number.ilike.%${val}%,destination.ilike.%${val}%`).limit(3)
+      ]);
+
+      const formatted: SearchResult[] = [
+        ...(shipRes.data || []).map(s => ({ id: s.id, type: 'shipment' as const, label: s.code || 'Embarque', sub: s.destination || 'Sin destino', status: s.status })),
+        ...(quoteRes.data || []).map(q => ({ id: q.id, type: 'quote' as const, label: q.quote_number || 'Cotización', sub: q.destination || 'Sin destino', status: q.status }))
+      ];
+      setSearchResults(formatted);
+    } catch (e) { console.error(e); } finally { setIsSearching(false); }
+  };
+
+  // Atajos de teclado para el buscador
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setMenuOpen(false);
-      }
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "/" && document.activeElement?.tagName !== "INPUT") { e.preventDefault(); inputRef.current?.focus(); }
+      if (e.key === "Escape") { setGlobalQuery(""); inputRef.current?.blur(); }
     };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  // Cierre de menús al hacer clic fuera
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as any)) setMenuOpen(false);
+      if (searchRef.current && !searchRef.current.contains(e.target as any)) setGlobalQuery("");
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
     navigate("/login");
   };
-
-  useEffect(() => {
-    try { if (localStorage.getItem(LS_KEY) === "1") setSideCollapsed(true); } catch {}
-  }, []);
 
   useEffect(() => {
     (async () => {
@@ -83,66 +121,24 @@ export function ClientLayout({ title, subtitle, children, wide = false }: Client
   }, [navigate]);
 
   return (
-    <div className={`ff-app ${sideCollapsed ? "is-collapsed" : ""}`}>
-      <header className="ff-top">
-        <div className="ff-top__inner">
-          <div className="ff-top__left">
-         <img 
-  src={LOGO_SRC} 
-  alt="Fresh Food Panamá" 
-  className="ff-top__logo" 
-  onClick={() => navigate('/clients/dashboard')} 
-  // Eliminamos el style inline para que todo sea controlado desde globals.css
-/>
-            <div className="ff-v-sep" style={{ width: '1px', height: '24px', background: '#e2e8f0', margin: '0 16px' }} />
-            <div className="ff-top__titleWrap">
-              {title && <h1 className="ff-top__title">{title}</h1>}
-              {subtitle && <div className="ff-top__sub">{subtitle}</div>}
-            </div>
-          </div>
-
-          <div className="ff-top__right">
-            <button type="button" className="ff-chip" onClick={toggle}>
-              <Globe size={14} /> <span>{lang.toUpperCase()}</span>
-            </button>
-            
-            <div className="ff-user" ref={menuRef}>
-              <button type="button" className="ff-user__btn" onClick={() => setMenuOpen(!menuOpen)}>
-                <UserCircle2 size={18} />
-                <span className="ff-user__email">{me.email?.split('@')[0] ?? "Cliente"}</span>
-                <ChevronDown size={14} style={{ transform: menuOpen ? 'rotate(180deg)' : 'none', transition: '0.2s' }} />
-              </button>
-
-              {menuOpen && (
-                <div className="ff-user__menu">
-                  <div className="ff-user__info">
-                    <p className="ff-user__label">{lang === 'es' ? 'Sesión iniciada como' : 'Signed in as'}</p>
-                    <p className="ff-user__val">{me.email}</p>
-                  </div>
-                  <div className="ff-user__sep" />
-                  <button className="ff-user__logout" onClick={handleLogout}>
-                    <LogOut size={14} />
-                    <span>{lang === 'es' ? 'Cerrar Sesión' : 'Sign Out'}</span>
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
+    <div className="ff-app">
+      {toast && (
+        <div className={`ff-toast ${toast.type}`}>
+          {toast.type === 'success' ? <CheckCircle2 size={18}/> : <AlertCircle size={18}/>}
+          <span>{toast.msg}</span>
         </div>
-      </header>
+      )}
 
       <aside className="ff-side">
-        <div className="ff-side__brand" style={{ height: '40px', display: 'flex', alignItems: 'center', padding: '0 16px', marginBottom: '12px' }}>
-             {!sideCollapsed && <span style={{ color: '#ffffff', fontWeight: 900, fontSize: '12px', letterSpacing: '1px', opacity: 0.6 }}>PORTAL CLIENTE</span>}
+        <div className="ff-side__logo-container">
+          <img 
+            src={LOGO_WHITE} 
+            alt="FreshConnect" 
+            className="ff-side__logo" 
+            onClick={() => navigate('/clients/dashboard')} 
+          />
         </div>
-
-        <button type="button" className="ff-side__toggle" onClick={() => {
-            const newState = !sideCollapsed;
-            setSideCollapsed(newState);
-            localStorage.setItem(LS_KEY, newState ? "1" : "0");
-        }}>
-          {sideCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
-        </button>
+        <div style={{ height: '1px', background: 'rgba(255,255,255,0.05)', margin: '0 32px 20px' }} />
 
         <nav className="ff-side__nav">
           {nav.map((n) => {
@@ -150,57 +146,191 @@ export function ClientLayout({ title, subtitle, children, wide = false }: Client
             const active = location.pathname.startsWith(n.href);
             return (
               <Link key={n.href} to={n.href} className={`ff-side__item ${active ? "is-active" : ""}`}>
-                <span className="ff-side__ico"><Icon size={20} /></span>
+                <span className="ff-side__ico"><Icon size={18} /></span>
                 <span className="ff-side__lbl">{n.label}</span>
-                {active && <div className="ff-active-indicator" />}
               </Link>
             );
           })}
         </nav>
       </aside>
 
-      <div className="ff-main">
-        <main className={wide ? "ff-content-wide" : "ff-content"}>
-          {children}
-        </main>
-      </div>
+      <header className="ff-top">
+        <div className="ff-top__inner">
+          
+          <div className="ff-top__left">
+            <div className="ff-top__titleWrap">
+              {title && <h1 className="ff-top__title">{title}</h1>}
+              {subtitle && <div className="ff-top__sub">{subtitle}</div>}
+            </div>
+          </div>
+
+          <div className="ff-top__right">
+            
+            {/* BUSCADOR 360 (Versión Cliente) */}
+            <div className="ff-global-search" ref={searchRef}>
+              <div className={`ff-search-pill ${globalQuery ? 'has-val' : ''}`}>
+                <Search size={16} className="ico-search-main" />
+                <input 
+                  ref={inputRef}
+                  placeholder={lang === 'es' ? "Buscar... (/)" : "Search... (/)"}
+                  value={globalQuery}
+                  onChange={(e) => handleGlobalSearch(e.target.value)}
+                />
+                {isSearching && <Loader2 size={14} className="ff-spin" />}
+              </div>
+              
+              {globalQuery.length >= 2 && (
+                <div className="ff-search-results animate-fade-in">
+                  {searchResults.length > 0 ? searchResults.map((res, idx) => (
+                    <button 
+                      key={res.id} 
+                      className={`res-item ${selectedIndex === idx ? 'is-selected' : ''}`}
+                      onClick={() => {
+                        const path = res.type === 'shipment' ? 'shipments' : 'quotes';
+                        navigate(`/clients/${path}/${res.id}`); // Redirige a /clients/ en vez de /admin/
+                        setGlobalQuery("");
+                      }}
+                    >
+                      <div className={`res-tag ${res.type}`}>
+                        {res.type === 'shipment' ? <Ship size={12}/> : <FileText size={12}/>}
+                      </div>
+                      <div className="res-txt">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span className="res-title">{res.label}</span>
+                          {res.status && <span className={`res-status-badge ${res.status.toLowerCase()}`}>{res.status}</span>}
+                        </div>
+                        <span className="res-sub">{res.sub}</span>
+                      </div>
+                      <ArrowRight size={14} className="res-arr" />
+                    </button>
+                  )) : !isSearching && <div className="res-empty">{lang === 'es' ? 'Sin resultados' : 'No results found'}</div>}
+                </div>
+              )}
+            </div>
+
+            <button type="button" className="ff-chip" onClick={toggle}>
+              <Globe size={16} /> <span>{lang.toUpperCase()}</span>
+            </button>
+
+            <div className="ff-user" ref={menuRef}>
+              <button type="button" className="ff-user__btn" onClick={() => setMenuOpen(!menuOpen)}>
+                <UserCircle2 size={18} />
+                <span className="ff-user__email">{me.email?.split('@')[0] ?? "Cliente"}</span>
+                <ChevronDown size={14} className={menuOpen ? 'rotate' : ''} />
+              </button>
+              
+              {menuOpen && (
+                <div className="ff-user__menu animate-fade-in">
+                  <div className="ff-user__meta">
+                    <div className="ff-user__metaEmail">{me.email ?? "-"}</div>
+                    <div className="ff-user__metaRole">{lang === "es" ? "Portal Cliente" : "Client Portal"}</div>
+                  </div>
+                  <div className="ff-user__sep" />
+                  <button type="button" className="ff-user__item danger" onClick={handleLogout}>
+                    <LogOut size={16} /> <span>{lang === 'es' ? 'Cerrar sesión' : 'Sign Out'}</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+          </div>
+        </div>
+      </header>
+
+      <div className="ff-main"><main className={wide ? "ff-content-wide" : "ff-content"}>{children}</main></div>
 
       <style>{`
-        /* --- ESTILOS ORIGINALES RESTAURADOS --- */
-        .ff-app { display: grid; grid-template-areas: "top top" "side main"; grid-template-columns: 240px 1fr; grid-template-rows: 64px 1fr; height: 100vh; }
-        .ff-app.is-collapsed { grid-template-columns: 80px 1fr; }
-        .ff-top { grid-area: top; background: white; border-bottom: 1px solid #eef2f6; position: sticky; top: 0; z-index: 100; }
-        .ff-top__inner { display: flex; align-items: center; justify-content: space-between; height: 64px; padding: 0 24px; }
+        * { font-family: 'Poppins', sans-serif !important; }
         
-        /* EL COLOR VERDE BOSQUE ORIGINAL */
-        .ff-side { grid-area: side; background: #284b2c; border-right: 1px solid #1f3a22; padding: 24px 12px; position: relative; display: flex; flex-direction: column; gap: 4px; z-index: 90; }
-        .ff-side__item { display: flex; align-items: center; gap: 16px; padding: 12px 16px; color: #ffffff; text-decoration: none; border-radius: 12px; font-size: 14px; font-weight: 500; transition: all 0.2s ease; position: relative; }
-        .ff-side__item:hover { background: rgba(255,255,255,0.1); color: #f59e0b; }
-        
-        /* EL COLOR VERDE ACTIVO ORIGINAL */
-        .ff-side__item.is-active { background: #3a5a3e; color: #ffffff; font-weight: 700; box-shadow: inset 0 0 10px rgba(0,0,0,0.1); }
-        .ff-active-indicator { position: absolute; left: 0; top: 12px; bottom: 12px; width: 4px; background: #f59e0b; border-radius: 0 4px 4px 0; }
-        
-        .ff-side__toggle { position: absolute; right: -12px; top: 74px; width: 24px; height: 24px; background: #f59e0b; border: none; border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); z-index: 100; }
-        
-        .ff-main { grid-area: main; overflow-y: auto; background: #f8fafc; }
-        .ff-content { padding: 32px; max-width: 1400px; margin: 0 auto; width: 100%; }
-        .ff-top__title { font-size: 16px; font-weight: 800; color: #0f172a; margin: 0; }
-        .ff-top__sub { font-size: 11px; color: #64748b; }
-        .ff-chip { display: flex; align-items: center; gap: 6px; background: #f1f5f9; border: none; padding: 6px 12px; border-radius: 50px; font-size: 11px; font-weight: 700; color: #475569; cursor: pointer; }
-        
-        /* USER MENU */
-        .ff-user__btn { display: flex; align-items: center; gap: 10px; background: none; border: none; cursor: pointer; }
-        .ff-user__email { font-size: 13px; font-weight: 600; color: #1e293b; }
-        .ff-user__menu { position: absolute; right: 0; top: 110%; width: 200px; background: white; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); padding: 8px; z-index: 200; }
-        .ff-user__info { padding: 8px 12px; }
-        .ff-user__label { font-size: 10px; color: #94a3b8; text-transform: uppercase; margin: 0; }
-        .ff-user__val { font-size: 12px; font-weight: 700; color: #1e293b; margin: 2px 0 0; }
-        .ff-user__sep { height: 1px; background: #f1f5f9; margin: 8px 0; }
-        .ff-user__logout { width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #fff1f2; color: #e11d48; border: none; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; }
+        .ff-app { 
+          display: grid; 
+          grid-template-columns: 240px 1fr; 
+          grid-template-rows: 80px 1fr; 
+          grid-template-areas: "side top" "side main"; 
+          min-height: 100vh; 
+          background: #f3f5f1; /* ACÁ ESTÁ LA MAGIA: El color corporativo de fondo */
+        }
 
-        .is-collapsed .ff-side__lbl, .is-collapsed .ff-side__brand { display: none; }
-        .is-collapsed .ff-side__item { justify-content: center; padding: 12px; }
+        /* HEADER SUPERIOR */
+        .ff-top { grid-area: top; background: transparent !important; border: none !important; box-shadow: none !important; display: flex; align-items: center; padding: 0 32px; z-index: 100; }
+        .ff-top__inner { width: 100%; display: flex; justify-content: space-between; align-items: center; }
+        .ff-top__left { display: flex; flex-direction: column; }
+        .ff-top__titleWrap { display: flex; flex-direction: column; }
+        .ff-top__title { font-size: 24px; font-weight: 800; color: var(--ff-green-dark); margin: 0; }
+        .ff-top__sub { font-size: 13px; color: #64748b; font-weight: 500; }
+        .ff-top__right { display: flex; align-items: center; gap: 16px; position: relative; }
+
+        /* SIDEBAR */
+        .ff-side { grid-area: side; background-color: var(--ff-green-dark); display: flex; flex-direction: column; z-index: 110; }
+        .ff-side__logo-container { height: 80px; display: flex; align-items: center; padding: 0 32px; margin-bottom: 20px; }
+        .ff-side__logo { height: 32px; width: auto; max-width: 100%; object-fit: contain; cursor: pointer; }
+        .ff-side__nav { padding: 0 16px; display: flex; flex-direction: column; gap: 8px; }
+        .ff-side__item { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 12px; color: rgba(255, 255, 255, 0.65) !important; font-weight: 500; text-decoration: none; transition: 0.2s; }
+        .ff-side__item:hover { background: rgba(255, 255, 255, 0.05); color: #fff !important; }
+        .ff-side__item.is-active { background: rgba(255, 255, 255, 0.1); color: #fff !important; font-weight: 700; }
+
+        /* BUSCADOR 360 */
+        .ff-global-search { position: relative; }
+        .ff-search-pill { background: white !important; border: 1.5px solid rgba(34,76,34,0.2) !important; border-radius: 9999px !important; padding: 0 16px !important; height: 40px !important; display: flex; align-items: center; gap: 10px; width: 260px; transition: 0.3s ease;}
+        .ff-search-pill:focus-within { width: 340px; border-color: var(--ff-green-dark) !important; box-shadow: 0 0 0 3px rgba(34,76,34,0.1); }
+        .ff-search-pill input { border: none; background: transparent; outline: none; width: 100%; font-size: 13px; color: var(--ff-green-dark); font-weight: 600; }
+        .ff-search-pill input::placeholder { color: #94a3b8; font-weight: 500; }
+        .ico-search-main { color: var(--ff-green-dark) !important; opacity: 0.6; }
+
+        .ff-search-results { position: absolute; top: calc(100% + 8px); right: 0; width: 100%; min-width: 340px; background: #fff; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); z-index: 200; overflow: hidden; display: flex; flex-direction: column;}
+        .res-item { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: none; border: none; border-bottom: 1px solid #f1f5f9; cursor: pointer; text-align: left; transition: 0.2s;}
+        .res-item:last-child { border-bottom: none; }
+        .res-item:hover, .res-item.is-selected { background: #f8fafc; }
+        .res-tag { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .res-tag.shipment { background: #e0e7ff; color: #3730a3; }
+        .res-tag.quote { background: #fff7ed; color: #ea580c; }
+        .res-txt { display: flex; flex-direction: column; flex-grow: 1; overflow: hidden; }
+        .res-title { font-size: 13px; font-weight: 700; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .res-sub { font-size: 11px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .res-arr { color: #cbd5e1; transition: 0.2s; }
+        .res-item:hover .res-arr { color: var(--ff-green-dark); transform: translateX(3px); }
+        .res-empty { padding: 20px; text-align: center; color: #94a3b8; font-size: 12px; font-weight: 500; }
+        .res-status-badge { font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; background: #f1f5f9; color: #475569; }
+
+        /* BOTONES DERECHA */
+        .ff-chip { background: var(--ff-green-dark) !important; color: #fff !important; border: none !important; border-radius: 9999px !important; padding: 8px 16px !important; font-weight: 700 !important; height: 40px !important; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; transition: 0.2s; }
+        .ff-chip:hover { background: #16361a !important; }
+        
+        .ff-user { position: relative; }
+        .ff-user__btn { background: white !important; border: 1.5px solid rgba(34,76,34,0.2) !important; color: var(--ff-green-dark) !important; border-radius: 9999px !important; padding: 0 16px !important; height: 40px !important; font-weight: 700 !important; display: inline-flex; align-items: center; gap: 10px; cursor: pointer; transition: 0.2s; }
+        .ff-user__btn:hover { border-color: var(--ff-green-dark) !important; background: #f8fafc !important; }
+        .ff-user__email { font-size: 13px; }
+        
+        .ff-user__menu { position: absolute; top: calc(100% + 8px); right: 0; width: 240px; background: #fff; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); overflow: hidden; z-index: 200; }
+        .ff-user__meta { padding: 16px; background: #f8fafc; border-bottom: 1px solid #f1f5f9; }
+        .ff-user__metaEmail { font-size: 13px; font-weight: 700; color: #0f172a; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ff-user__metaRole { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+        .ff-user__sep { height: 1px; background: #f1f5f9; }
+        .ff-user__item { width: 100%; display: flex; align-items: center; gap: 10px; padding: 12px 16px; background: none; border: none; font-size: 13px; font-weight: 600; color: #475569; cursor: pointer; transition: 0.2s; text-align: left; }
+        .ff-user__item.danger { color: #ef4444; }
+        .ff-user__item.danger:hover { background: #fef2f2; color: #dc2626; }
+
+        /* MAIN Y ALERTAS */
+        .ff-main { 
+          grid-area: main; 
+          padding: 0 32px; 
+          overflow-y: auto; 
+          background: transparent; /* ACÁ ESTÁ LA OTRA MAGIA: Transparente para dejar ver el fondo corporativo */
+        }
+        .ff-content { max-width: 1600px; margin: 0 auto; width: 100%; padding-bottom: 40px;}
+        .ff-content-wide { max-width: 100%; margin: 0; width: 100%; padding-bottom: 40px;}
+
+        .ff-toast { position: fixed; bottom: 24px; right: 24px; display: flex; align-items: center; gap: 10px; padding: 14px 24px; border-radius: 12px; font-size: 13px; font-weight: 600; color: white; z-index: 9999; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.2); animation: slideUp 0.3s ease forwards; }
+        .ff-toast.success { background: #10b981; }
+        .ff-toast.error { background: #ef4444; }
+
+        .rotate { transform: rotate(180deg); }
+        .ff-spin { animation: spin 1s linear infinite; }
+        .animate-fade-in { animation: fadeIn 0.2s ease forwards; }
+        
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
       `}</style>
     </div>
   );

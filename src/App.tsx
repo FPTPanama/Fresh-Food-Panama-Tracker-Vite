@@ -3,6 +3,8 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'r
 import { supabase } from "@/lib/supabaseClient";
 import "./styles/globals.css";
 import { LanguageProvider } from "@/lib/uiLanguage";
+import CompanyProfile from "./pages/admin/CompanyProfile";
+
 
 
 // --- COMPONENTE DE CARGA ---
@@ -173,7 +175,7 @@ export default function App() {
             <Route path="/admin/users" element={<ProtectedRoute requiredRole="admin"><AdminUsers /></ProtectedRoute>} />
             <Route path="/admin/users/:id" element={<ProtectedRoute requiredRole="admin"><AdminUserDetail /></ProtectedRoute>} />
             <Route path="/admin/staff/:id" element={<ProtectedRoute requiredRole="admin"><StaffDetail /></ProtectedRoute>} />
-
+            <Route path="/admin/company" element={<ProtectedRoute requiredRole="admin"><CompanyProfile /></ProtectedRoute>} />
             {/* MODULO CRM & IA */}
 <Route path="/admin/crm/leads" element={<ProtectedRoute requiredRole="admin"><AdminLeads /></ProtectedRoute>} /> 
 <Route path="/admin/crm/campaigns" element={<ProtectedRoute requiredRole="admin"><CampaignsIndex /></ProtectedRoute>} />
