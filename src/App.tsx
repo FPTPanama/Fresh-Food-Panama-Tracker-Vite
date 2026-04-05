@@ -98,8 +98,8 @@ const AdminQuoteDetailPage = lazy(() => import('@/pages/admin/quotes/[id]'));
 const AdminUsers = lazy(() => import('@/pages/admin/users/index'));
 const AdminUserDetail = lazy(() => import('@/pages/admin/users/UserDetail'));
 const StaffDetail = lazy(() => import('@/pages/admin/staff/StaffDetail'));
-const AdminLeads = lazy(() => import('./pages/admin/LeadsIndex')); // <--- NUEVO
-
+const AdminLeads = lazy(() => import('./pages/admin/crm/LeadsIndex')); // <--- NUEVO
+const CampaignsIndex = lazy(() => import('./pages/admin/crm/CampaignsIndex'));
 
 // --- COMPONENTE DE REDIRECCIÓN INTELIGENTE ---
 const HomeRedirect = () => {
@@ -174,8 +174,9 @@ export default function App() {
             <Route path="/admin/users/:id" element={<ProtectedRoute requiredRole="admin"><AdminUserDetail /></ProtectedRoute>} />
             <Route path="/admin/staff/:id" element={<ProtectedRoute requiredRole="admin"><StaffDetail /></ProtectedRoute>} />
 
-            {/* CRM DE PROSPECCIÓN IA */}
-            <Route path="/admin/leads" element={<ProtectedRoute requiredRole="admin"><AdminLeads /></ProtectedRoute>} /> {/* <--- NUEVO */}
+            {/* MODULO CRM & IA */}
+<Route path="/admin/crm/leads" element={<ProtectedRoute requiredRole="admin"><AdminLeads /></ProtectedRoute>} /> 
+<Route path="/admin/crm/campaigns" element={<ProtectedRoute requiredRole="admin"><CampaignsIndex /></ProtectedRoute>} />
 
             {/* Redirecciones Finales */}
             <Route path="/" element={<HomeRedirect />} />

@@ -5,9 +5,8 @@ const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SE
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 export const handler = async (event: any) => {
-  // 1. Recibimos Ubicación y PRODUCTO desde la interfaz
   let location = "Mercamadrid, España";
-  let product = "Piña Premium y frutas exóticas"; // Valor por defecto
+  let product = "Piña Premium"; 
   
   if (event.body) {
     const body = JSON.parse(event.body);
@@ -17,21 +16,21 @@ export const handler = async (event: any) => {
 
   try {
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-    const { data: existing } = await supabase.from('leads_prospecting').select('company_name').limit(100);
+    const { data: existing } = await supabase.from('leads_prospecting').select('company_name').limit(200);
     const blacklist = existing?.map(e => e.company_name).join(', ') || 'Ninguna';
 
-    // 2. El Prompt ahora es 100% dinámico
     const prompt = `
-      Actúa como un analista de mercado hispanohablante.
-      Identifica 10 empresas reales en ${location} que sean importadores o distribuidores de ${product}.
-      EXCLUYE estas empresas: [${blacklist}].
+      Actúa como un analista de mercado hispanohablante experto en B2B agrícola.
+      Identifica 10 empresas reales en ${location} que importen/distribuyan ${product}.
+      EXCLUYE: [${blacklist}].
       
-      REGLA DE ORO: Todo el contenido del JSON debe estar ESTRICTAMENTE EN ESPAÑOL.
+      REGLAS DE FORMATO ESTRICTAS:
+      1. country_code: DEBE ser estrictamente el código ISO 3166-1 alpha-2 (Ej: 'ES' para España, 'IT' para Italia, 'FR' para Francia).
+      2. tags: Un array de strings con 3 etiquetas exactas sobre su operación. Usa palabras clave como "Mayorista", "Retail", "Aéreo", "Marítimo", "Alto Volumen".
+      3. ai_analysis: Una sola frase corta (máximo 15 palabras) resumiendo por qué son un buen objetivo para ${product}.
       
-      Para el campo "ai_analysis", usa estrictamente este formato de 4 puntos en español:
-      "Foco: [Su nicho] | Vol: [Alto/Medio/Bajo] | Log: [Aérea/Marítima/Terrestre] | Segmento: [Minorista/Mayorista/Horeca]"
-      
-      Devuelve ÚNICAMENTE un array JSON con: company_name, city, country, website, contact_email, contact_phone, company_size, air_experience, ai_analysis, lead_score (1-5).
+      Devuelve ÚNICAMENTE un array JSON válido con estos campos: 
+      company_name, city, country, country_code, website, contact_email, contact_phone, company_size, tags (array), ai_analysis, lead_score (1-5).
     `;
 
     const result = await model.generateContent(prompt);
@@ -39,17 +38,19 @@ export const handler = async (event: any) => {
     const cleanJson = text.substring(text.indexOf('['), text.lastIndexOf(']') + 1);
     const leads = JSON.parse(cleanJson);
 
-    // Guardamos en la fuente (source) el producto para saber de qué campaña vino
-    const { error } = await supabase.from('leads_prospecting').insert(
-      leads.map((l: any) => ({ 
-        ...l, 
-        status: 'new', 
-        source: `manual_${product.substring(0,10).replace(/\s/g, '_')}` 
-      }))
-    );
+    // Formateamos los datos antes de guardarlos para el nuevo CRM
+    const formattedLeads = leads.map((l: any) => ({ 
+      ...l, 
+      status: 'new',
+      pipeline_stage: 'inbox',
+      interested_in: [product], // Lo guardamos como Array
+      source: `manual_${product.substring(0,10).replace(/\s/g, '_')}` 
+    }));
+
+    const { error } = await supabase.from('leads_prospecting').insert(formattedLeads);
 
     if (error) throw error;
-    return { statusCode: 200, body: JSON.stringify({ message: `Minado exitoso: 10 leads para ${product}`, count: leads.length }) };
+    return { statusCode: 200, body: JSON.stringify({ message: `Minado estructurado completado para ${product}`, count: leads.length }) };
 
   } catch (err: any) {
     return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
