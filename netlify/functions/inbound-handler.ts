@@ -17,6 +17,7 @@ export const handler: Handler = async (event) => {
     });
 
     busboy.on('finish', async () => {
+      // Extraer datos del correo
       const from = result.from || "Desconocido";
       const subject = result.subject || "Sin asunto";
       const text = result.text || "";
@@ -26,6 +27,7 @@ export const handler: Handler = async (event) => {
       const subjectLower = subject.toLowerCase();
 
       // 1. GUARDAR EN SUPABASE
+      // Guardamos SIEMPRE, sin importar el alias, para tener el registro en el Message Center
       const { data: inserted, error: dbError } = await supabase
         .from('inbound_emails')
         .insert([{
@@ -35,26 +37,40 @@ export const handler: Handler = async (event) => {
           target_alias: to
         }]).select().single();
 
-      // 2. LÓGICA DE FILTRADO
-      const opKeywords = ["factura", "cotización", "cotizacion", "retraso", "cambio de vuelo", "vuelo"];
+      if (dbError) {
+        console.error("Error guardando en Supabase:", dbError.message);
+      }
+
+      // 2. LÓGICA DE FILTRADO PARA WHATSAPP
       let shouldNotify = false;
       let icon = "📩";
 
-      if (cleanTo.includes("ventas")) { shouldNotify = true; icon = "💰 VENTAS"; }
-      else if (cleanTo.includes("soporte")) { shouldNotify = true; icon = "🛠️ SOPORTE"; }
-      else if (cleanTo.includes("operaciones") && opKeywords.some(k => subjectLower.includes(k))) {
-        shouldNotify = true; icon = "🚢 OPERACIONES";
+      // Detectamos el departamento basándonos en el alias de destino
+      if (cleanTo.includes("ventas")) { 
+        shouldNotify = true; 
+        icon = "💰 VENTAS"; 
+      } 
+      else if (cleanTo.includes("soporte")) { 
+        shouldNotify = true; 
+        icon = "🛠️ SOPORTE"; 
+      } 
+      else if (cleanTo.includes("administracion") || cleanTo.includes("admin")) { 
+        shouldNotify = true; 
+        icon = "💼 ADMIN"; 
+      }
+      else if (cleanTo.includes("operaciones")) {
+        shouldNotify = true; 
+        icon = "🚢 OPERACIONES";
       }
 
       // 3. DISPARAR WHATSAPP VÍA TWILIO
-      if (shouldNotify && !dbError) {
+      if (shouldNotify) {
         const waMsg = `${icon} Nuevo Correo\nDe: ${from}\nAsunto: ${subject}`;
         
-        // Variables de entorno de Twilio
         const twilioSid = process.env.TWILIO_ACCOUNT_SID;
         const twilioToken = process.env.TWILIO_AUTH_TOKEN;
-        const twilioFrom = process.env.TWILIO_WA_FROM; // Usando tu nombre de variable /
-        const myWhatsApp = process.env.ADMIN_WHATSAPP_NUMBER; // ej: whatsapp:+507...
+        const twilioFrom = process.env.TWILIO_WA_FROM; 
+        const myWhatsApp = process.env.ADMIN_WHATSAPP_NUMBER;
 
         if (twilioSid && twilioToken && twilioFrom && myWhatsApp) {
           const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
@@ -65,7 +81,7 @@ export const handler: Handler = async (event) => {
           });
 
           try {
-            await fetch(twilioUrl, {
+            const twilioRes = await fetch(twilioUrl, {
               method: 'POST',
               headers: {
                 'Authorization': 'Basic ' + Buffer.from(`${twilioSid}:${twilioToken}`).toString('base64'),
@@ -73,7 +89,13 @@ export const handler: Handler = async (event) => {
               },
               body: waPayload
             });
-            console.log("WhatsApp enviado a", myWhatsApp);
+
+            if (twilioRes.ok) {
+              console.log(`WhatsApp enviado con éxito para ${cleanTo}`);
+            } else {
+              const errData = await twilioRes.json();
+              console.error("Twilio devolvió error:", errData);
+            }
           } catch (waError) {
             console.error("Error de conexión con Twilio:", waError);
           }

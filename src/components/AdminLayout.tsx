@@ -46,6 +46,7 @@ export function AdminLayout({ title, subtitle, children }: { title?: string; sub
 
  const nav = useMemo(() => [
     { href: "/admin/dashboard", label: lang === "es" ? "Dashboard" : "Dashboard", icon: LayoutGrid },
+    { href: "/admin/messages", label: lang === "es" ? "Centro de Mensajes" : "Message Center", icon: Globe },
     { href: "/admin/shipments", label: lang === "es" ? "Embarques" : "Shipments", icon: Package },
     { href: "/admin/quotes", label: lang === "es" ? "Cotizaciones" : "Quotes", icon: FileText },
     { href: "/admin/users", label: lang === "es" ? "Clientes" : "Clients", icon: Users },
