@@ -6,6 +6,12 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
+# --- INICIO DE CONFIGURACIÓN DEL CRONJOB ---
+# Se ejecuta Lunes y Miércoles a las 13:00 UTC (8:00 AM hora de Panamá)
+[functions."cron-mining"]
+  schedule = "0 13 * * 1,3"
+# --- FIN DE CONFIGURACIÓN DEL CRONJOB ---
+
 [functions."renderQuotePdf"]
   included_files = [
     "public/brand/**"
@@ -22,5 +28,3 @@
   from = "/*"
   to = "/index.html"
   status = 200
-
-  
