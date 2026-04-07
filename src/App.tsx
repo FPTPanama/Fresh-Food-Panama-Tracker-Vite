@@ -5,6 +5,7 @@ import "./styles/globals.css";
 import { LanguageProvider } from "@/lib/uiLanguage";
 import CompanyProfile from "./pages/admin/CompanyProfile";
 import MessageCenter from './pages/admin/MessageCenter';
+import AutomationsIndex from '@/pages/admin/automations';
 
 
 
@@ -168,6 +169,7 @@ export default function App() {
             <Route path="/clients/shipments/:id" element={<ProtectedRoute requiredRole="client"><ClientShipmentDetail /></ProtectedRoute>} />
 
             {/* Rutas Admin */}
+            {/* Rutas Admin */}
             <Route path="/admin/dashboard" element={<ProtectedRoute requiredRole="admin"><AdminDashboard /></ProtectedRoute>} />
             <Route path="/admin/shipments" element={<ProtectedRoute requiredRole="admin"><AdminShipmentsIndex /></ProtectedRoute>} />
             <Route path="/admin/shipments/:id" element={<ProtectedRoute requiredRole="admin"><AdminShipmentDetail /></ProtectedRoute>} />
@@ -178,7 +180,8 @@ export default function App() {
             <Route path="/admin/staff/:id" element={<ProtectedRoute requiredRole="admin"><StaffDetail /></ProtectedRoute>} />
             <Route path="/admin/company" element={<ProtectedRoute requiredRole="admin"><CompanyProfile /></ProtectedRoute>} />
             <Route path="/admin/messages" element={<ProtectedRoute requiredRole="admin"><MessageCenter /></ProtectedRoute>} />
-            
+            <Route path="/admin/automations" element={<ProtectedRoute requiredRole="admin"><AutomationsIndex /></ProtectedRoute>} />
+
             {/* MODULO CRM & IA */}
 <Route path="/admin/crm/leads" element={<ProtectedRoute requiredRole="admin"><AdminLeads /></ProtectedRoute>} /> 
 <Route path="/admin/crm/campaigns" element={<ProtectedRoute requiredRole="admin"><CampaignsIndex /></ProtectedRoute>} />
