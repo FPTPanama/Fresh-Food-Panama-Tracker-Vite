@@ -6,17 +6,24 @@ const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SE
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 const sendTwilioMessage = async (to: string, message: string) => {
-  const sid = process.env.TWILIO_ACCOUNT_SID!;
-  const token = process.env.TWILIO_AUTH_TOKEN!;
-  const fromNumber = process.env.TWILIO_WA_FROM || "+14155238886";
-  const cleanNumber = to.replace(/\s+/g, '');
-  const formattedTo = `whatsapp:${cleanNumber.startsWith('+') ? cleanNumber : '+' + cleanNumber}`;
+  // .trim() es vital aquí para limpiar espacios invisibles de las variables de entorno
+  const sid = process.env.TWILIO_ACCOUNT_SID?.trim();
+  const token = process.env.TWILIO_AUTH_TOKEN?.trim();
+  let fromEnv = process.env.TWILIO_WA_FROM?.trim() || "+14155238886";
 
-  console.log(`📤 Enviando WhatsApp a ${formattedTo}...`);
+  const finalFrom = fromEnv.startsWith('whatsapp:') ? fromEnv : `whatsapp:${fromEnv}`;
+  const cleanTo = to.replace(/\s+/g, '');
+  const finalTo = cleanTo.startsWith('whatsapp:') ? cleanTo : `whatsapp:${cleanTo.startsWith('+') ? cleanTo : '+' + cleanTo}`;
+
+  // LOGS DE DIAGNÓSTICO (Míralos en la consola de Netlify)
+  console.log(`🔍 DIAGNÓSTICO:`);
+  console.log(`- Usando SID: ...${sid?.slice(-5)}`); // Solo mostramos los últimos 5 para seguridad
+  console.log(`- From: ${finalFrom}`);
+  console.log(`- To: ${finalTo}`);
 
   const params = new URLSearchParams();
-  params.append("To", formattedTo);
-  params.append("From", `whatsapp:${fromNumber}`);
+  params.append("To", finalTo);
+  params.append("From", finalFrom);
   params.append("Body", message);
 
   const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
@@ -29,8 +36,11 @@ const sendTwilioMessage = async (to: string, message: string) => {
   });
 
   const data = await response.json();
-  if (!response.ok) throw new Error(`Twilio Error: ${data.message}`);
-  console.log(`✅ Mensaje entregado a Twilio. SID: ${data.sid}`);
+  if (!response.ok) {
+    console.error("❌ ERROR TWILIO:", JSON.stringify(data, null, 2));
+    throw new Error(data.message);
+  }
+  console.log(`✅ MENSAJE ENVIADO. SID: ${data.sid}`);
 };
 
 export const handler: Handler = async (event) => {
