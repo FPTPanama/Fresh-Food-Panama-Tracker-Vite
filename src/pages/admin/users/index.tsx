@@ -88,7 +88,8 @@ export default function ClientsIndex() {
         // AHORA INCLUIMOS 'Administrativo' para que aparezca Pedro Rojas
         supabase.from('profiles')
           .select('*')
-          .in('position', ['Gerente General', 'Ventas', 'Administrativo']),
+          // Agrega el cargo exacto que le pusiste a Daniel en la BD
+.in('position', ['Gerente General', 'Ventas', 'Administrativo', 'Marketing y Diseño']),
         supabase.from('external_partners').select('*')
       ]);
       
@@ -128,7 +129,7 @@ export default function ClientsIndex() {
         // En la tabla inferior solo mostramos personal que NO es Gerente, Ventas ni Administrativo
         let query = supabase.from('profiles').select('user_id, email, role, full_name, position', { count: 'exact' })
           .in('role', ['admin', 'superadmin'])
-          .or('position.is.null,and(position.neq.Gerente General,position.neq.Ventas,position.neq.Administrativo)'); // <--- AGREGAMOS ESTE NEQ
+          .or('position.is.null,and(position.neq.Gerente General,position.neq.Ventas,position.neq.Administrativo,position.neq.Marketing y Diseño)');
 
         if (q) query = query.or(`full_name.ilike.%${q}%,email.ilike.%${q}%`);
         if (accessFilter) query = query.eq('role', accessFilter);

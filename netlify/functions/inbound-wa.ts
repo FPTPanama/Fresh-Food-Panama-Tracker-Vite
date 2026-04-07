@@ -60,7 +60,7 @@ export const handler: Handler = async (event) => {
       generationConfig: { responseMimeType: "application/json" }
     });
 
-    const prompt = `
+  const prompt = `
       Eres el Orquestador Operador de Fresh Food Panamá.
       
       CONTEXTO EQUIPO:
@@ -68,28 +68,23 @@ export const handler: Handler = async (event) => {
       - Ricardo Boccardo "Pipo" (Ventas)
       - Victor Centeno (Ventas)
       - Ronald Chanis (Inspector)
-      - Pedro Rojas (Finanzas / Administrativo) <--- NUEVO
+      - Pedro Rojas (Finanzas / Administrativo)
+      - Daniel Vazquez (Marketing y Diseño / Arte / Cajas y Corbatines)
       - Candida Ojo (Documental)
       - Katia Peralta (Logística)
       
-      Misión: Extraer datos para una ORDEN DE TRABAJO o REPORTE, Pedirle a Administracion/administrativo que pague proveedores y genere facturas
-      a clientes, Pedirle a administracion que coordine las compras de insumos (cajas, corbatines)
-
-      TABLAS DISPONIBLES:
-      - 'quotes': columnas [quote_number, total, status, client_snapshot (jsonb con nombre), destination]
-      - 'shipments': columnas [awb, destination, status, pallets, boxes, product_name, flight_number]
-
       INTENCIONES:
-      1. COORDINAR_EMBARQUE: Avisar a Inspector y Documental.
-      2. SOLICITAR_TARIFA: Avisar a Logística.
-      3. REPORTE_DATOS: El CEO pide info de la BD (ej. "últimas cotizaciones", "embarques en tránsito").
-      4. INSTRUCCION_DIRECTA: Mensaje de persona a persona.
-
-      Responde ÚNICAMENTE este JSON:
+      - REPORTE_GERENCIAL: El CEO pide un resumen semanal/mensual de métricas (cotizaciones, montos, embarques).
+      - INSTRUCCION_DIRECTA: Ordenar a alguien cotizar, inspeccionar, diseñar o revisar pagos.
+      
+      JSON de respuesta:
       {
-        "intent": "REPORTE_DATOS" | "COORDINAR_EMBARQUE" | "INSTRUCCION_DIRECTA" | "SOLICITAR_TARIFA",
-        "query_config": { "table": "quotes" | "shipments", "filter_status": "texto opcional", "limit": 3, "target_name": "Nombre de quien recibirá el reporte" },
-        "tasks": [{ "target": "Rol o Nombre", "message_to_send": "texto" }]
+        "intent": "REPORTE_GERENCIAL" | "INSTRUCCION_DIRECTA",
+        "data": {
+          "target_name": "Nombre exacto o Gerencia (ej. Daniel Vazquez)",
+          "client_search": "Nombre del cliente si se menciona",
+          "specs": { "producto": "", "cantidad": "", "calibres": "", "color": "", "fecha": "" }
+        }
       }
 
       Mensaje: "${incomingMessage}"
