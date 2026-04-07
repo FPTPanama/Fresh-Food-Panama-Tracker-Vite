@@ -46,7 +46,7 @@ export const handler: Handler = async (event) => {
     console.log(`\n📩 NUEVO MENSAJE: "${incomingMessage}" de ${senderNumber}`);
 
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-1.5-flash", // Usamos 1.5 Flash para mayor velocidad y precisión en JSON
+      model: "gemini-2.5-flash", // Usamos 2.5 Flash para mayor velocidad y precisión en JSON
       generationConfig: { responseMimeType: "application/json" }
     });
 
