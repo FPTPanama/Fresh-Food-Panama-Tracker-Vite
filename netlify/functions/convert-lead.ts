@@ -23,7 +23,8 @@ export const handler = async (event: any) => {
       city: lead.city,
       status: 'active',
       internal_notes: `PROSPECTO IA: ${lead.ai_analysis} | Score: ${lead.lead_score}/5`,
-      lead_source: 'ai_mining'
+      // AQUI ESTÁ LA MAGIA: Le pasamos la etiqueta correcta según el origen
+      lead_source: lead.source === 'ai-cron' ? 'ai-cron' : 'ai-manual'
     }]).select().single();
 
     if (iError) throw iError;

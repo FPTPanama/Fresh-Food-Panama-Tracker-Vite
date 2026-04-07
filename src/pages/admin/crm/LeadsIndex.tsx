@@ -160,16 +160,28 @@ export default function LeadsIndex() {
 
   // FUNCIONES INDIVIDUALES
   const runMining = async () => {
-    if (!window.confirm(`¿Buscar 10 importadores de ${targetProduct} en ${targetLocation}?`)) return;
+    if (!window.confirm(`¿Buscar 20 importadores de ${targetProduct} en ${targetLocation}?`)) return;
     setIsMining(true);
     try {
-      const res = await fetch('/.netlify/functions/mine-leads', {
+      // 1. Apuntamos al archivo correcto (con el sufijo -background)
+      const res = await fetch('/.netlify/functions/mineLeads-background', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ location: targetLocation, product: targetProduct })
       });
-      if (res.ok) { notify(`Completado: Búsqueda de ${targetProduct}`, "success"); setPage(1); fetchData(); }
-    } catch (err) { notify("Error", "error"); } finally { setIsMining(false); }
+      
+      // 2. Netlify Background functions devuelven 202 Accepted (casi al instante)
+      if (res.ok || res.status === 202) { 
+        notify(`Proceso en segundo plano iniciado. La IA está buscando importadores de ${targetProduct}. Esto tomará ~1 minuto.`, "success"); 
+        
+        // Opcional: Como tarda 1 minuto, recargar al instante no mostrará los leads. 
+        // Avisamos al usuario que refresque en un momento.
+      }
+    } catch (err) { 
+      notify("Error de conexión", "error"); 
+    } finally { 
+      setIsMining(false); 
+    }
   };
 
   const handleConvert = async (leadId: string) => {
