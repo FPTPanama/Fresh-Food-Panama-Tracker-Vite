@@ -109,23 +109,30 @@ export const handler: Handler = async (event) => {
             continue;
           }
 
+         // 1. Traductor del nombre de la tabla
+          const recordTypeMap: Record<string, string> = {
+            'quotes': 'Cotización',
+            'shipments': 'Embarque',
+            'milestones': 'Hito Operativo',
+            'leads_prospecting': 'Prospecto (Lead)',
+            'clients': 'Cliente'
+          };
+          const recordType = recordTypeMap[table] || 'Registro';
+
+          // 2. Extractor Inteligente del "Número Humano" según la tabla
+          let referenceNumber = record.id.slice(0, 8); // Fallback (ID corto) por si no encuentra nada
+          if (table === 'quotes') referenceNumber = record.quote_no || record.quote_number || referenceNumber;
+          if (table === 'shipments') referenceNumber = record.code || record.awb || referenceNumber;
+          if (table === 'leads_prospecting') referenceNumber = record.company_name || record.contact_name || referenceNumber;
+          if (table === 'clients') referenceNumber = record.name || record.legal_name || referenceNumber;
+
+          // 3. El nuevo mensaje amigable
           const messageText = `⚡ *Fresh Food Automations*\n\n` +
                               `Hola ${person.full_name.split(' ')[0]},\n` +
                               `Evento: *${rule.title}*\n\n` +
+                              `📌 *${recordType}:* ${referenceNumber}\n` +
                               `📝 *Instrucción:*\n${action.action}\n\n` +
-                              `_Referencia DB: ${table} ID: ${record.id}_`;
-
-          // 📡 Enviar por los canales activados
-          if (action.channels.whatsapp && person.phone) {
-            console.log(`-> Enviando WA a ${person.full_name} (${person.phone})`);
-            await sendTwilioMessage(person.phone, messageText);
-          }
-
-          if (action.channels.email && person.email) {
-            console.log(`-> Enviando Email a ${person.full_name} (${person.email})`);
-            const subject = `[Fresh Food Alert] ${rule.title}`;
-            await sendEmail(person.email, subject, messageText);
-          }
+                              `_Generado automáticamente por ChatOps_`;
         }
       }
     }

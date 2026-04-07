@@ -22,9 +22,34 @@ interface AutomationRule {
 }
 
 const TRIGGER_EVENTS: Record<string, { label: string; table: string; column: string; options: string[] }> = {
-  quotes_status: { label: "Cotizaciones (Estado General)", table: "quotes", column: "status", options: ["approved", "archived", "draft", "lost", "rejected", "sent", "won"] },
-  shipments_status: { label: "Embarques (Estado de Carga)", table: "shipments", column: "status", options: ["AT_DESTINATION", "CREATED", "PACKED"] },
-  shipments_flight: { label: "Vuelos (Estado de Aerolínea)", table: "shipments", column: "flight_status", options: ["landed"] }
+  quotes_status: { 
+    label: "💰 Cotizaciones (Estado)", table: "quotes", column: "status", 
+    options: ["approved", "archived", "draft", "lost", "rejected", "sent", "won"] 
+  },
+  shipments_status: { 
+    label: "📦 Embarques (Estado General)", table: "shipments", column: "status", 
+    options: ["AT_DESTINATION", "CREATED", "PACKED"] 
+  },
+  shipments_flight: { 
+    label: "✈️ Vuelos (Estado Aerolínea)", table: "shipments", column: "flight_status", 
+    options: ["landed"] 
+  },
+  milestones_type: { 
+    label: "📍 Hitos Operativos (Tracking)", table: "milestones", column: "type", 
+    options: ["AT_DESTINATION", "AT_ORIGIN", "CREATED", "DOCS_READY", "IN_TRANSIT", "PACKED"] 
+  },
+  leads_pipeline: { 
+    label: "🎯 CRM Leads (Pipeline)", table: "leads_prospecting", column: "pipeline_stage", 
+    options: ["contacted", "error_no_draft", "inbox", "replied"] 
+  },
+  leads_status: { 
+    label: "🎯 CRM Leads (Estado)", table: "leads_prospecting", column: "status", 
+    options: ["converted", "new", "rejected"] 
+  },
+  clients_status: { 
+    label: "🏢 Clientes (Estado)", table: "clients", column: "status", 
+    options: ["active", "inactive"] // Agregué 'inactive' por si lo usas a futuro
+  }
 };
 
 export default function AutomationsIndex() {
