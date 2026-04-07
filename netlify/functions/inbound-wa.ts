@@ -2,22 +2,24 @@ import type { Handler } from "@netlify/functions";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createClient } from "@supabase/supabase-js";
 
-// Inicializamos clientes
 const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
-// Función auxiliar para enviar WhatsApp por Twilio
 const sendTwilioMessage = async (to: string, message: string) => {
   const sid = process.env.TWILIO_ACCOUNT_SID!;
   const token = process.env.TWILIO_AUTH_TOKEN!;
   const fromNumber = process.env.TWILIO_WA_FROM || "+14155238886";
+  const cleanNumber = to.replace(/\s+/g, '');
+  const formattedTo = `whatsapp:${cleanNumber.startsWith('+') ? cleanNumber : '+' + cleanNumber}`;
+
+  console.log(`📤 Enviando WhatsApp a ${formattedTo}...`);
 
   const params = new URLSearchParams();
-  params.append("To", `whatsapp:${to.startsWith('+') ? to : '+' + to}`);
+  params.append("To", formattedTo);
   params.append("From", `whatsapp:${fromNumber}`);
   params.append("Body", message);
 
-  await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+  const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
     method: "POST",
     headers: {
       "Authorization": `Basic ${Buffer.from(`${sid}:${token}`).toString('base64')}`,
@@ -25,6 +27,10 @@ const sendTwilioMessage = async (to: string, message: string) => {
     },
     body: params
   });
+
+  const data = await response.json();
+  if (!response.ok) throw new Error(`Twilio Error: ${data.message}`);
+  console.log(`✅ Mensaje entregado a Twilio. SID: ${data.sid}`);
 };
 
 export const handler: Handler = async (event) => {
@@ -35,98 +41,102 @@ export const handler: Handler = async (event) => {
     const senderNumber = bodyParams.get("From")?.replace("whatsapp:", "");
     const incomingMessage = bodyParams.get("Body");
 
-    if (!incomingMessage || !senderNumber) {
-      return { statusCode: 200, body: "<Response></Response>", headers: { "Content-Type": "text/xml" } };
-    }
+    if (!incomingMessage) return { statusCode: 200, body: "<Response></Response>" };
 
-    console.log(`🤖 Mensaje entrante de ${senderNumber}: "${incomingMessage}"`);
+    console.log(`\n📩 NUEVO MENSAJE: "${incomingMessage}" de ${senderNumber}`);
 
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-2.5-flash",
+      model: "gemini-1.5-flash", // Usamos 1.5 Flash para mayor velocidad y precisión en JSON
       generationConfig: { responseMimeType: "application/json" }
     });
 
-    // --- EL NUEVO CEREBRO (PROMPT MAESTRO) ---
     const prompt = `
-      Eres el Orquestador de Operaciones de Fresh Food Panamá.
-      Lee el siguiente mensaje del CEO e identifica la intención.
+      Eres el Orquestador IA de Fresh Food Panamá. Tienes acceso a la base de datos.
+      
+      EQUIPO: David Vazquez (Gerente), Ricardo Boccardo (Ventas, apodo: "Pipo"), Victor Centeno (Ventas), Candida Ojo (Documental), Ronald Chanis (Inspector), Katia Peralta (Logística).
 
-      CONTEXTO DEL EQUIPO (NOMBRES Y CARGOS):
-      - Gerente General: David Vazquez
-      - Ventas: Ricardo Boccardo (apodo/alias: "Pipo") y Victor Centeno
-      - Gestión Documental: Candida Ojo
-      - Inspector: Ronald Chanis
-      - Logística: Katia Peralta
-      
-      REGLAS DE INTENCIÓN:
-      1. COORDINAR_EMBARQUE: Notifica al "Inspector" (omite cliente/precio, solo da fecha/volumen) y a "Gestión Documental" (preparar Guía Aérea y Factura).
-      2. SOLICITAR_TARIFA: Notifica a "Logística".
-      3. COTIZAR: Notifica a "Ventas".
-      4. INSTRUCCION_DIRECTA: Si el CEO pide explícitamente decirle algo a alguien específico (ej. "reportale a David...", "dile a Pipo...", "habla con Victor"), la intención es INSTRUCCION_DIRECTA. El target DEBE ser el Nombre Completo de esa persona.
-      
-      Devuelve ÚNICAMENTE este formato JSON:
+      TABLAS DISPONIBLES:
+      - 'quotes': columnas [quote_number, total, status, client_snapshot (jsonb con nombre), destination]
+      - 'shipments': columnas [awb, destination, status, pallets, boxes, product_name, flight_number]
+
+      INTENCIONES:
+      1. COORDINAR_EMBARQUE: Avisar a Inspector y Documental.
+      2. SOLICITAR_TARIFA: Avisar a Logística.
+      3. REPORTE_DATOS: El CEO pide info de la BD (ej. "últimas cotizaciones", "embarques en tránsito").
+      4. INSTRUCCION_DIRECTA: Mensaje de persona a persona.
+
+      Responde ÚNICAMENTE este JSON:
       {
-        "intent": "COORDINAR_EMBARQUE" | "SOLICITAR_TARIFA" | "COTIZAR" | "INSTRUCCION_DIRECTA" | "OTRO",
-        "extracted_info": { "destination": "", "pallets": "", "date": "", "client": "" },
-        "tasks": [
-          {
-            "target": "Nombre Completo de la persona (ej. 'Ricardo Boccardo') O el Cargo (ej. 'Inspector')",
-            "message_to_send": "Texto exacto y profesional que se le enviará por WhatsApp a esta persona"
-          }
-        ]
+        "intent": "REPORTE_DATOS" | "COORDINAR_EMBARQUE" | "INSTRUCCION_DIRECTA" | "SOLICITAR_TARIFA",
+        "query_config": { "table": "quotes" | "shipments", "filter_status": "texto opcional", "limit": 3, "target_name": "Nombre de quien recibirá el reporte" },
+        "tasks": [{ "target": "Rol o Nombre", "message_to_send": "texto" }]
       }
 
-      Mensaje del CEO: "${incomingMessage}"
+      Mensaje: "${incomingMessage}"
     `;
 
     const result = await model.generateContent(prompt);
-    const aiResponse = JSON.parse(result.response.text());
-    
-    console.log("🧠 Decisión de la IA:", JSON.stringify(aiResponse, null, 2));
+    const ai = JSON.parse(result.response.text());
+    console.log("🧠 Inteligencia:", JSON.stringify(ai, null, 2));
 
-    let processedTasks = 0;
+    // 1. Obtener Directorio
+    const [{ data: internal }, { data: external }] = await Promise.all([
+      supabase.from('profiles').select('position, phone, full_name'),
+      supabase.from('external_partners').select('position, phone, full_name')
+    ]);
+    const directory = [...(internal || []), ...(external || [])];
 
-    if (aiResponse.tasks && aiResponse.tasks.length > 0) {
+    // 2. Ejecutar Lógica de Reportes
+    if (ai.intent === "REPORTE_DATOS") {
+      const { table, filter_status, limit, target_name } = ai.query_config;
+      let query = supabase.from(table).select('*').order('created_at', { ascending: false }).limit(limit || 3);
       
-      // NUEVO: Ahora extraemos también el full_name de la base de datos
-      const [{ data: internal }, { data: external }] = await Promise.all([
-        supabase.from('profiles').select('position, phone, full_name'),
-        supabase.from('external_partners').select('position, phone, full_name')
-      ]);
-      const directory = [...(internal || []), ...(external || [])];
+      if (filter_status) query = query.ilike('status', `%${filter_status}%`);
+      
+      const { data: dbRows } = await query;
+      
+      let reportBody = `📊 *REPORTE FRESH FOOD*\n`;
+      if (table === 'quotes') {
+        reportBody += `_Últimas ${dbRows?.length} cotizaciones:_\n\n`;
+        dbRows?.forEach(q => {
+          const clientName = q.client_snapshot?.name || 'Cliente';
+          reportBody += `• *${q.quote_number}*: ${clientName} - *$${q.total}* (${q.status})\n`;
+        });
+      } else if (table === 'shipments') {
+        reportBody += `_Embarques ${filter_status || ''}:_\n\n`;
+        dbRows?.forEach(s => {
+          reportBody += `• *AWB ${s.awb || 'S/G'}*: ${s.pallets} pal. a ${s.destination} (${s.status})\n`;
+        });
+      }
 
-      for (const task of aiResponse.tasks) {
-        // Búsqueda inteligente: Busca coincidencia por Cargo O por Nombre Completo
+      // ¿A quién se le envía? Si el CEO dijo "Reportale a David", buscamos a David. Si no, al CEO.
+      const targetPerson = directory.find(p => p.full_name?.toLowerCase().includes(target_name?.toLowerCase()));
+      const finalDest = targetPerson?.phone || senderNumber;
+      
+      await sendTwilioMessage(finalDest, reportBody);
+    } 
+    
+    // 3. Ejecutar Lógica de Mensajes Directos / Coordinación
+    else if (ai.tasks) {
+      for (const task of ai.tasks) {
         const person = directory.find(p => 
-          (p.position && p.position.toLowerCase() === task.target.toLowerCase()) ||
-          (p.full_name && p.full_name.toLowerCase().includes(task.target.toLowerCase()))
+          p.position?.toLowerCase() === task.target.toLowerCase() || 
+          p.full_name?.toLowerCase().includes(task.target.toLowerCase())
         );
-        
-        if (person && person.phone) {
-          await sendTwilioMessage(person.phone, `🤖 *Notificación del Sistema (Fresh Food):*\n\n${task.message_to_send}`);
-          processedTasks++;
-        } else {
-          console.warn(`⚠️ No se encontró número para el target: ${task.target}`);
+        if (person?.phone) {
+          await sendTwilioMessage(person.phone, `🤖 *Mensaje de Gerencia:*\n\n${task.message_to_send}`);
         }
       }
     }
 
-    const replyText = processedTasks > 0 
-      ? `✅ Procesado exitosamente (${aiResponse.intent}). Se han despachado ${processedTasks} instrucciones a tu equipo.`
-      : `⚠️ Entendido, pero no encontré acciones operativas o roles registrados para procesar este mensaje de forma automática.`;
-
     return {
       statusCode: 200,
       headers: { "Content-Type": "text/xml" },
-      body: `<Response><Message>${replyText}</Message></Response>`
+      body: `<Response><Message>✅ Entendido. He procesado la solicitud: ${ai.intent}</Message></Response>`
     };
 
   } catch (error: any) {
-    console.error("❌ Error en inbound-wa:", error.message);
-    return {
-      statusCode: 200,
-      headers: { "Content-Type": "text/xml" },
-      body: `<Response><Message>❌ Hubo un error procesando tu instrucción: ${error.message}</Message></Response>`
-    };
+    console.error("❌ ERROR:", error.message);
+    return { statusCode: 200, body: `<Response><Message>⚠️ Error: ${error.message}</Message></Response>` };
   }
 };
