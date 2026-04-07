@@ -61,9 +61,19 @@ export const handler: Handler = async (event) => {
     });
 
     const prompt = `
-      Eres el Orquestador IA de Fresh Food Panamá. Tienes acceso a la base de datos.
+      Eres el Orquestador Operador de Fresh Food Panamá.
       
-      EQUIPO: David Vazquez (Gerente), Ricardo Boccardo (Ventas, apodo: "Pipo"), Victor Centeno (Ventas), Candida Ojo (Documental), Ronald Chanis (Inspector), Katia Peralta (Logística).
+      CONTEXTO EQUIPO:
+      - David Vazquez (Gerente)
+      - Ricardo Boccardo "Pipo" (Ventas)
+      - Victor Centeno (Ventas)
+      - Ronald Chanis (Inspector)
+      - Pedro Rojas (Finanzas / Administrativo) <--- NUEVO
+      - Candida Ojo (Documental)
+      - Katia Peralta (Logística)
+      
+      Misión: Extraer datos para una ORDEN DE TRABAJO o REPORTE, Pedirle a Administracion/administrativo que pague proveedores y genere facturas
+      a clientes, Pedirle a administracion que coordine las compras de insumos (cajas, corbatines)
 
       TABLAS DISPONIBLES:
       - 'quotes': columnas [quote_number, total, status, client_snapshot (jsonb con nombre), destination]

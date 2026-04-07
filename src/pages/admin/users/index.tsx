@@ -82,10 +82,13 @@ export default function ClientsIndex() {
     }
   };
 
-  const fetchCoreTeam = async () => {
+ const fetchCoreTeam = async () => {
     try {
       const [ { data: internal }, { data: external } ] = await Promise.all([
-        supabase.from('profiles').select('*').in('position', ['Gerente General', 'Ventas']),
+        // AHORA INCLUIMOS 'Administrativo' para que aparezca Pedro Rojas
+        supabase.from('profiles')
+          .select('*')
+          .in('position', ['Gerente General', 'Ventas', 'Administrativo']),
         supabase.from('external_partners').select('*')
       ]);
       
@@ -122,10 +125,10 @@ export default function ClientsIndex() {
         setTotalItems(count || 0);
 
       } else {
-        // Tabla inferior solo muestra personal que NO es Gerente ni Ventas
+        // En la tabla inferior solo mostramos personal que NO es Gerente, Ventas ni Administrativo
         let query = supabase.from('profiles').select('user_id, email, role, full_name, position', { count: 'exact' })
           .in('role', ['admin', 'superadmin'])
-          .or('position.is.null,and(position.neq.Gerente General,position.neq.Ventas)');
+          .or('position.is.null,and(position.neq.Gerente General,position.neq.Ventas,position.neq.Administrativo)'); // <--- AGREGAMOS ESTE NEQ
 
         if (q) query = query.or(`full_name.ilike.%${q}%,email.ilike.%${q}%`);
         if (accessFilter) query = query.eq('role', accessFilter);
