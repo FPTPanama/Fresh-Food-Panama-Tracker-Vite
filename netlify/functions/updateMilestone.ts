@@ -36,9 +36,9 @@ export const handler: Handler = async (event) => {
     const awb = body.awb == null ? null : clean(body.awb) || null;
     const color = body.color == null ? null : clean(body.color) || null;
     
-    // 🚨 ARREGLO DE SPANGLISH: Aceptamos ambas del frontend, pero guardamos estrictamente como 'calibre'
+    // 🚨 ARREGLO DE SPANGLISH: Aceptamos ambas del frontend, pero guardaremos estrictamente como 'caliber'
     const calibreRaw = body.calibre ?? body.caliber;
-    const calibre = calibreRaw == null ? null : clean(calibreRaw) || null;
+    const caliberFinal = calibreRaw == null ? null : clean(calibreRaw) || null;
 
     if (typeRaw === "IN_TRANSIT" && !flight_number && !body.flight_number) {
         console.warn(`[WARN] Embarque ${shipmentId} pasado a IN_TRANSIT sin número de vuelo.`);
@@ -47,14 +47,13 @@ export const handler: Handler = async (event) => {
     // 1) Actualiza shipments
     const shipUpdate: any = { status: typeRaw };
     
-    // NOTA DE ARQUITECTO: Si tienes una columna 'updated_at' en tu DB, descomenta la siguiente línea. 
-    // Si no la tienes, dejarla comentada evitará otro Error 500.
-    // shipUpdate.updated_at = new Date().toISOString();
-
+    // Asignaciones quirúrgicas a los nombres de columna confirmados
     if (flight_number !== null) shipUpdate.flight_number = flight_number;
     if (awb !== null) shipUpdate.awb = awb;
-    if (calibre !== null) shipUpdate.calibre = calibre; // 🚨 Ahora actualiza la columna correcta
     if (color !== null) shipUpdate.color = color;
+    
+    // 👇 ESTA ES LA LÍNEA CORREGIDA PARA SUPABASE 👇
+    if (caliberFinal !== null) shipUpdate.caliber = caliberFinal; 
 
     console.log(`Intentando actualizar shipment ${shipmentId} con:`, shipUpdate);
 
@@ -65,8 +64,6 @@ export const handler: Handler = async (event) => {
     }
 
     // 2) Registro de Milestone
-    // Capturamos el error para que, si falla (ej. por ser un hito duplicado), 
-    // no rompa la ejecución principal y el cliente vea el éxito del cambio de status.
     const { error: msErr } = await sbAdmin.from("milestones").insert({
         shipment_id: shipmentId,
         type: typeRaw,
