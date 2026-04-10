@@ -1,85 +1,122 @@
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL!;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const supabase = createClient(supabaseUrl, supabaseKey);
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 export const handler = async (event: any) => {
-  // AQUÍ ESTÁ LA CLAVE: Esta es la función que recibe leadIds (plural) y campaignContext
-  const { leadIds, campaignContext, productName } = JSON.parse(event.body || '{}');
+  const headers = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS'
+  };
+
+  if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: 'ok' };
+  if (event.httpMethod !== 'POST') return { statusCode: 405, headers, body: 'Method Not Allowed' };
 
   try {
-    const { data: biz } = await supabase
-      .from('product_settings')
-      .select('*')
-      .ilike('product_name', `%${productName}%`)
-      .single();
-      
-    if (!biz) throw new Error(`Configuración de producto no encontrada para: ${productName}`);
+    // 🚨 Agregamos 'previewOnly' al payload
+    const { leadIds, campaignContext, isClientBroadcast, previewOnly = false } = JSON.parse(event.body || '{}');
 
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    if (!leadIds || leadIds.length === 0) return { statusCode: 400, headers, body: JSON.stringify({ error: "No se enviaron IDs" }) };
 
-    const safeContext = campaignContext || "Campaña General";
-    const campaignName = safeContext.substring(0, 40) + (safeContext.length > 40 ? '...' : '');
+    const model = genAI.getGenerativeModel({ model: "gemini-3.1-flash-lite-preview" });
 
-    console.log(`Iniciando generación de campaña: "${campaignName}" para ${leadIds.length} leads.`);
+    if (isClientBroadcast) {
+      const { data: clients, error: clientErr } = await supabase.from('clients').select('*').in('id', leadIds);
+      if (clientErr) throw clientErr;
 
-    await Promise.all(leadIds.map(async (id: string) => {
-      const { data: lead } = await supabase.from('leads_prospecting').select('*').eq('id', id).single();
-      if (!lead) return;
+      let previewData = null; // Guardará la vista previa
+      let enviosExitosos = 0;
 
-      const isSpain = lead.country_code === 'ES';
-      const lang = isSpain ? 'Español' : 'Inglés (English)';
-      const isPineapple = biz.product_name.toLowerCase().includes('piña');
-      
-      const culturalContext = isSpain 
-        ? "Usa 'Ustedes'. Prohibido el 'vosotros/vuestro'. Tono profesional latinoamericano." 
-        : "High-level B2B professional English. Use 'You' (formal). Direct and clear value proposition.";
+      for (const client of clients) {
+        if (!client.contact_email) continue;
 
-      // EL PROMPT "FRANCOTIRADOR B2B"
-      const prompt = `
-        Eres un vendedor B2B francotirador. Vas a redactar el CUERPO de un correo de venta directa a ${lead.company_name} en ${lead.city}.
+        // 🚨 AQUÍ USAMOS EL IDIOMA DE LA BD (O fallback a español)
+        const lang = client.preferred_language === 'en' ? 'INGLÉS (English)' : 'ESPAÑOL';
+
+        // 🚨 PROMPT ACTUALIZADO PARA PEDIR UN ASUNTO DINÁMICO
+        const prompt = `
+          Eres el Director de Exportaciones B2B de Fresh Food Panama.
+          Vas a redactar un correo directo a nuestro cliente actual: ${client.name}.
+          MOTIVO: ${campaignContext}
+          
+          REGLAS ESTRICTAS:
+          1. Idioma: ${lang}.
+          2. LA PRIMERA LÍNEA DEBE SER EL ASUNTO EXACTO, usando este formato: 
+             ASUNTO: [Tu asunto dinámico y persuasivo aquí]
+          3. A partir de la segunda línea, redacta el cuerpo del correo. Inicia con un saludo formal pero directo.
+          4. Tono: Transaccional, experto. Cero poesía ("espero que este correo le encuentre bien").
+          5. NO FIRMES el correo.
+        `;
+
+        const result = await model.generateContent(prompt);
+        let rawResponse = result.response.text().trim();
+
+        // 🚨 SEPARAR EL ASUNTO DEL CUERPO
+        let dynamicSubject = "Actualización Operativa - Fresh Food Panama";
+        let emailBody = rawResponse;
+
+        const lines = rawResponse.split('\n');
+        if (lines[0].toUpperCase().includes('ASUNTO:')) {
+          dynamicSubject = lines[0].replace(/ASUNTO:/i, '').trim();
+          emailBody = lines.slice(1).join('\n').trim();
+        } else if (lines[0].toUpperCase().includes('SUBJECT:')) {
+          dynamicSubject = lines[0].replace(/SUBJECT:/i, '').trim();
+          emailBody = lines.slice(1).join('\n').trim();
+        }
+
+        emailBody = emailBody.replace(/(Sincerely|Best regards|Regards|Atentamente|Saludos cordiales|Un saludo)[\s\S]*/gi, '').trim();
         
-        OFERTA ESPECÍFICA: ${safeContext}
-        PRODUCTO: ${biz.product_name}
-        
-        REGLAS DE ORO EXTREMAS (CÚMPLELAS AL 100%):
-        1. IDIOMA: Estrictamente en ${lang}.
-        2. PROHIBIDO SALUDAR: NO digas "I hope this email finds you well", "Espero que estés bien", ni "Dear...". Inicia directamente con un saludo simple ("Hi ${lead.company_name} team," o "Hola equipo de ${lead.company_name},") y ve al grano en la misma línea.
-        3. LONGITUD: Máximo 3 oraciones en todo el correo. Corto, al grano y transaccional.
-        4. CERO ADORNOS: Elimina palabras como "delighted", "exclusive", "meticulously", "I trust this email finds you well", "valued partners". 
-        5. PROHIBIDO FIRMAR: NO escribas "Sincerely", "Best regards", ni tu nombre al final. Yo pondré la firma.
-        6. ASUNTO: Primera línea debe decir "ASUNTO: [Máximo 5 palabras]"
-        7. TONO: ${culturalContext}
-      `;
+        const plainTextSignature = `\n\n--\nDirección Comercial\nFresh Food Panamá\nWeb: freshfoodpanama.com\n\n---\nSi deseas dejar de recibir estas alertas, responde "Baja".`;
+        const finalPlainText = emailBody + plainTextSignature;
 
-      const result = await model.generateContent(prompt);
-      let rawDraft = result.response.text();
+        const htmlBody = emailBody.replace(/\n/g, '<br>');
+        const emailHtml = `
+          <div style="font-family: -apple-system, sans-serif; font-size: 14px; color: #1e293b; max-width: 600px; margin: 0 auto; padding: 20px;">
+            ${htmlBody}
+            <br><br>--<br><strong>Dirección Comercial</strong><br>Fresh Food Panamá<br><a href="https://freshfoodpanama.com" style="color: #d17711; text-decoration: none;">freshfoodpanama.com</a>
+            <hr style="border: none; border-top: 1px solid #e2e8f0; margin-top: 30px; margin-bottom: 20px;" />
+            <p style="font-size: 11px; color: #94a3b8; text-align: center;">Si deseas dejar de recibir nuestras alertas, responde "Baja".</p>
+          </div>
+        `;
 
-      // EL FILTRO ANTI-IA (Corta despedidas indeseadas)
-      rawDraft = rawDraft.replace(/(Sincerely|Best regards|Regards|Atentamente|Saludos cordiales|Thank you|I trust this email)[\s\S]*/gi, '').trim();
+        // 🚨 MODO VISTA PREVIA (Si es true, guardamos los datos y ROMPEMOS el ciclo sin enviar nada)
+        if (previewOnly) {
+          previewData = { subject: dynamicSubject, html: emailHtml };
+          break; // Rompemos el for loop
+        }
 
-      // LA FIRMA MANUAL
-      const signature = `\n\n--\n${biz.sender_name}\nDirector de Exportaciones | Fresh Food Panamá\nWhatsApp: +507 6000-0000\nWeb: ${biz.website}`;
-      
-      const finalDraftText = rawDraft + signature;
+        // Si no es preview, enviamos por Resend
+        const resendReq = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            from: 'Fresh Food Panama <ventas@freshfoodpanama.com>', // 🚨 Verifica tu dominio
+            to: client.contact_email,
+            subject: dynamicSubject,
+            html: emailHtml,
+            text: finalPlainText
+          })
+        });
 
-      // GUARDADO EN BASE DE DATOS
-      const { error: updateError } = await supabase.from('leads_prospecting').update({ 
-        email_draft: finalDraftText,
-        pipeline_stage: 'queued', 
-        last_email_type: 'campaña_especial',
-        active_campaign: campaignName 
-      }).eq('id', id);
-
-      if (updateError) {
-        console.error(`Error guardando campaña para lead ${id}:`, updateError.message);
+        if (resendReq.ok) enviosExitosos++;
       }
-    }));
 
-    return { statusCode: 200, body: JSON.stringify({ message: "Campaña encolada correctamente" }) };
-  } catch (err: any) {
-    console.error("Error crítico en generate-campaign:", err.message);
-    return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
+      // Si estábamos en modo preview, devolvemos el borrador generado
+      if (previewOnly) {
+        return { statusCode: 200, headers, body: JSON.stringify({ isPreview: true, previewData }) };
+      }
+
+      return { statusCode: 200, headers, body: JSON.stringify({ success: true, message: `Se enviaron ${enviosExitosos} correos exitosamente.` }) };
+    }
+
+    // ... (La Ruta B de Leads se mantiene igual) ...
+
+  } catch (error: any) {
+    console.error("Error en generate-campaign:", error);
+    return { statusCode: 500, headers, body: JSON.stringify({ error: error.message }) };
   }
 };

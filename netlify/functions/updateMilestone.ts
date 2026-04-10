@@ -1,4 +1,3 @@
-// netlify/functions/updateMilestone.ts
 import type { Handler } from "@netlify/functions";
 import { sbAdmin, getUserAndProfile, json, text, isPrivilegedRole, optionsResponse } from "./_util";
 
@@ -24,7 +23,7 @@ export const handler: Handler = async (event) => {
       return text(400, "Body inválido (JSON requerido)");
     }
 
-    // --- FLEXIBILIDAD DE NOMBRES (Busca todas las variantes posibles) ---
+    // --- FLEXIBILIDAD DE NOMBRES ---
     const shipmentId = clean(body.shipmentId || body.shipment_id || body.id);
     const typeRaw = clean(body.type || body.milestoneType || body.milestone_type || body.status).toUpperCase();
 
@@ -35,33 +34,40 @@ export const handler: Handler = async (event) => {
     const note = body.note == null ? null : clean(body.note) || null;
     const flight_number = body.flight_number == null ? null : clean(body.flight_number) || null;
     const awb = body.awb == null ? null : clean(body.awb) || null;
-    const caliber = body.caliber == null ? null : clean(body.caliber) || null;
     const color = body.color == null ? null : clean(body.color) || null;
+    
+    // 🚨 ARREGLO DE SPANGLISH: Aceptamos ambas del frontend, pero guardamos estrictamente como 'calibre'
+    const calibreRaw = body.calibre ?? body.caliber;
+    const calibre = calibreRaw == null ? null : clean(calibreRaw) || null;
 
-    // --- VALIDACIONES RELAJADAS (Para evitar bloqueos en el Dashboard rápido) ---
-    // Solo validamos si el dato no existe ya en la base de datos (opcional)
-    // Por ahora, permitimos el update pero registramos el error si falta en estados críticos
     if (typeRaw === "IN_TRANSIT" && !flight_number && !body.flight_number) {
-        console.warn("Update a IN_TRANSIT sin flight_number");
+        console.warn(`[WARN] Embarque ${shipmentId} pasado a IN_TRANSIT sin número de vuelo.`);
     }
 
     // 1) Actualiza shipments
-    const shipUpdate: any = { 
-        status: typeRaw,
-        updated_at: new Date().toISOString()
-    };
+    const shipUpdate: any = { status: typeRaw };
+    
+    // NOTA DE ARQUITECTO: Si tienes una columna 'updated_at' en tu DB, descomenta la siguiente línea. 
+    // Si no la tienes, dejarla comentada evitará otro Error 500.
+    // shipUpdate.updated_at = new Date().toISOString();
 
     if (flight_number !== null) shipUpdate.flight_number = flight_number;
     if (awb !== null) shipUpdate.awb = awb;
-    if (caliber !== null) shipUpdate.caliber = caliber;
+    if (calibre !== null) shipUpdate.calibre = calibre; // 🚨 Ahora actualiza la columna correcta
     if (color !== null) shipUpdate.color = color;
 
-    const { error: upErr } = await sbAdmin.from("shipments").update(shipUpdate).eq("id", shipmentId);
-    if (upErr) return text(500, `Error actualizando embarque: ${upErr.message}`);
+    console.log(`Intentando actualizar shipment ${shipmentId} con:`, shipUpdate);
 
-    // 2) Registro de Milestone (Simplificado para evitar el error 500 de On Conflict)
-    // Intentamos insertar. Si falla por duplicado, no matamos la ejecución.
-    await sbAdmin.from("milestones").insert({
+    const { error: upErr } = await sbAdmin.from("shipments").update(shipUpdate).eq("id", shipmentId);
+    if (upErr) {
+        console.error("❌ Error de Supabase al actualizar shipment:", upErr.message);
+        return text(500, `Error BD actualizando embarque: ${upErr.message}`);
+    }
+
+    // 2) Registro de Milestone
+    // Capturamos el error para que, si falla (ej. por ser un hito duplicado), 
+    // no rompa la ejecución principal y el cliente vea el éxito del cambio de status.
+    const { error: msErr } = await sbAdmin.from("milestones").insert({
         shipment_id: shipmentId,
         type: typeRaw,
         note: note || `Cambio de estado a ${typeRaw}`,
@@ -69,9 +75,15 @@ export const handler: Handler = async (event) => {
         at: new Date().toISOString(),
     });
 
+    if (msErr) {
+        console.warn(`[WARN] Milestone no insertado (posible duplicado): ${msErr.message}`);
+    }
+
+    console.log(`✅ Embarque ${shipmentId} actualizado a ${typeRaw} exitosamente.`);
     return json(200, { ok: true, shipmentId, type: typeRaw });
+    
   } catch (e: any) {
-    console.error("Error crítico en updateMilestone:", e.message);
+    console.error("❌ Error crítico no controlado en updateMilestone:", e.message);
     return text(500, e?.message || "Server error");
   }
 };

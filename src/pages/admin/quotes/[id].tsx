@@ -518,7 +518,7 @@ export default function AdminQuoteDetailPage() {
             <div className="f" style={{ flex: "0 0 90px" }}>
               <label>Incoterm</label>
               <select disabled={isReadOnly} value={incoterm} onChange={e => setIncoterm(e.target.value)}>
-                <option value="EXW">EXW</option><option value="FOB">FOB</option><option value="CIP">CIP</option><option value="CIF">CIF</option><option value="DDP">DDP</option>
+                <option value="EXW">EXW</option><option value="FOB">FOB</option><option value="CIP">CIP</option><option value="CIF">CIF</option><option value="DDP">DDP</option><option value="FCA">FCA</option>
               </select>
             </div>
 

@@ -10,7 +10,7 @@ import { useNavigate } from 'react-router-dom';
 import { CustomerQuoteModal } from '@/components/quotes/CustomerQuoteModal';
 import { useUILang } from '@/lib/uiLanguage';
 
-// --- HELPERS UI (Idénticos al Admin) ---
+// --- HELPERS UI ---
 const getStatusConfig = (status: string, type: 'shipment' | 'quote', lang: 'es' | 'en') => {
   const s = status?.toLowerCase() || '';
   if (type === 'shipment') {
@@ -90,10 +90,11 @@ export default function ClientDashboard() {
           initial: client.name?.charAt(0).toUpperCase()
         });
 
+        // FIX ARQUITECTURA: Ahora extraemos totals (JSON) y filtramos borradores
         const [quotesRes, shipmentsRes, allQuotesStats] = await Promise.all([
-          supabase.from('quotes').select('*').eq('client_id', client.id).in('status', ['sent', 'Solicitud']).order('created_at', { ascending: false }).limit(6),
+          supabase.from('quotes').select('*').eq('client_id', client.id).neq('status', 'draft').order('created_at', { ascending: false }).limit(6),
           supabase.from('shipments').select(`*, milestones (type, at, note)`).eq('client_id', client.id).not('status', 'in', '("delivered", "cancelled", "AT_DESTINATION")').order('created_at', { ascending: false }).limit(6),
-          supabase.from('quotes').select('total, boxes, status').eq('client_id', client.id)
+          supabase.from('quotes').select('total, totals, boxes, status').eq('client_id', client.id).neq('status', 'draft')
         ]);
 
         const allQuotes = allQuotesStats.data || [];
@@ -104,7 +105,8 @@ export default function ClientDashboard() {
           stats: {
             totalBoxes: approvedQuotes.reduce((acc, q) => acc + (Number(q.boxes) || 0), 0),
             pendingQuotes: allQuotes.filter(q => q.status === 'sent' || q.status === 'Solicitud').length,
-            totalInvestment: approvedQuotes.reduce((acc, q) => acc + (Number(q.total) || 0), 0),
+            // FIX ARQUITECTURA: Extraemos el valor seguro de totals.total
+            totalInvestment: approvedQuotes.reduce((acc, q) => acc + (Number(q.totals?.total) || Number(q.total) || 0), 0),
             newToReview: pendingToReview
           },
           recentQuotes: quotesRes.data || [],
@@ -200,7 +202,7 @@ export default function ClientDashboard() {
           </div>
         </div>
 
-        {/* TABLAS PRINCIPALES (Estilo Admin) */}
+        {/* TABLAS PRINCIPALES */}
         <div className="ff-main-grid">
           
           {/* TRÁNSITOS ACTIVOS */}
@@ -243,16 +245,19 @@ export default function ClientDashboard() {
             </div>
           </section>
 
-          {/* COTIZACIONES PENDIENTES */}
+          {/* COTIZACIONES PENDIENTES / RECIENTES */}
           <section className="ff-panel">
             <div className="section-header">
-              <h3><FileText size={14}/> {lang === 'es' ? 'Gestiones Pendientes' : 'Pending Approvals'}</h3>
+              <h3><FileText size={14}/> {lang === 'es' ? 'Gestiones Recientes' : 'Recent Quotes'}</h3>
               <button onClick={() => navigate('/clients/quotes')}>{lang === 'es' ? 'Historial' : 'History'}</button>
             </div>
             
             <div className="ff-table-list">
               {data.recentQuotes.length > 0 ? data.recentQuotes.map(q => {
                 const statusConfig = getStatusConfig(q.status, 'quote', lang as 'es' | 'en');
+                // FIX ARQUITECTURA: Extraemos el valor del JSON totals?.total
+                const quoteTotal = q.totals?.total || q.total || 0;
+                
                 return (
                   <div key={q.id} className={`ff-list-row quote ${q.status === 'sent' ? 'urgent' : ''}`} onClick={() => navigate(`/clients/quotes/${q.id}`)}>
                     <div className="col-code">
@@ -260,7 +265,10 @@ export default function ClientDashboard() {
                       <span className="code-text">{q.quote_number || 'NUEVA'}</span>
                     </div>
                     <div className="col-dest">{q.destination}</div>
-                    <div className="col-amount">{formatCurrency(q.total)}</div>
+                    
+                    {/* Renderizamos el total corregido */}
+                    <div className="col-amount">{formatCurrency(quoteTotal)}</div>
+                    
                     <div className="col-status">
                       <span className={`status-badge ${statusConfig.class}`}>{statusConfig.label}</span>
                     </div>
@@ -307,7 +315,7 @@ export default function ClientDashboard() {
           .btn-create.main { background: var(--ff-green-dark); color: white; border: none; box-shadow: 0 4px 10px rgba(34, 76, 34, 0.2); }
           .btn-create.main:hover { background: #16361a; box-shadow: 0 6px 15px rgba(34, 76, 34, 0.3); transform: translateY(-1px); }
 
-          /* HERO METRICS (3 Columnas para Cliente) */
+          /* HERO METRICS */
           .ff-hero-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
           .metric-card { background: white; padding: 20px; border-radius: 16px; border: 1px solid rgba(34, 76, 34, 0.08); display: flex; flex-direction: column; gap: 6px; box-shadow: 0 2px 10px rgba(0,0,0,0.02); transition: 0.2s; }
           .metric-card:hover { transform: translateY(-2px); box-shadow: 0 6px 15px rgba(34,76,34,0.04); }
@@ -350,7 +358,7 @@ export default function ClientDashboard() {
           .col-amount { font-size: 13px; font-weight: 700; color: var(--ff-green-dark); min-width: 80px; text-align: right; font-variant-numeric: tabular-nums; }
           .col-status { min-width: 90px; display: flex; justify-content: flex-end; }
           
-          /* Mini Stepper para Embarques */
+          /* Mini Stepper */
           .col-stepper-mini { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; min-width: 100px; }
           .stepper-track { width: 100%; height: 4px; background: #e2e8f0; border-radius: 2px; overflow: hidden; }
           .stepper-fill { height: 100%; background: var(--ff-green); border-radius: 2px; transition: width 1s ease; }

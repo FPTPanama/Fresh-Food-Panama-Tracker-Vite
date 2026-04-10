@@ -223,7 +223,7 @@ export function QuickQuoteModal({ isOpen, onClose, initialClientId }: QuickQuote
                 <button type="button" className={form.mode === 'SEA' ? 'on s' : ''} onClick={() => setForm({...form, mode: 'SEA'})}><Ship size={16} /></button>
               </div>
               <div className="ff-input-main width-110">
-                <select value={form.incoterm} onChange={e => setForm({...form, incoterm: e.target.value})}><option>CIP</option><option>FOB</option><option>CFR</option><option>DDP</option></select>
+                <select value={form.incoterm} onChange={e => setForm({...form, incoterm: e.target.value})}><option>CIP</option><option>FOB</option><option>CFR</option><option>DDP</option><option>FCA</option></select>
                 <ChevronDown size={12} className="ff-arr" />
               </div>
             </div>

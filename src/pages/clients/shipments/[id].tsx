@@ -46,6 +46,10 @@ type ShipmentDetail = {
   pallets?: number | null;
   weight_kg?: number | null;
   flight_number?: string | null;
+  // 👇 Agrega estas dos líneas para que TS deje de quejarse
+  flight_departure_time?: string | null;
+  flight_arrival_time?: string | null;
+  // 👆 
   awb?: string | null;
   calibre?: string | null;
   color?: string | null;
@@ -217,15 +221,34 @@ export default function ClientShipmentDetail() {
                   <div className="saas-stepper-track-bg"></div>
                   <div className="saas-stepper-track-fill" style={{ width: `${progressPct}%` }}></div>
                   
-                  <div className="saas-stepper-nodes">
+                 <div className="saas-stepper-nodes">
                     {STEPS.map((stepObj, idx) => {
                       const stepId = CHAIN[idx];
-                      const isPassed = currentStepIndex > idx;
+                      const isPassed = currentStepIndex >= idx;
                       const isCurrent = currentStepIndex === idx;
                       const isFirst = idx === 0;
                       const isLast = idx === STEPS.length - 1;
 
                       const milestoneData = data?.milestones?.find(m => m.type === stepId);
+
+                      // --- 📡 MAGIA DEL RADAR: Lógica dinámica de Hovers ---
+                      let ttTime = milestoneData ? new Date(milestoneData.at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '';
+                      let ttNote = milestoneData?.note || '';
+
+                      // Interceptamos el despegue (In Transit)
+                      if (stepId === 'IN_TRANSIT' && data?.flight_departure_time) {
+                        ttTime = new Date(data.flight_departure_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                        ttNote = `Vuelo ${data?.flight_number || ''} en el aire. Despegue confirmado.`;
+                      }
+                      
+                      // Interceptamos el aterrizaje (At Destination)
+                      if (stepId === 'AT_DESTINATION' && data?.flight_arrival_time) {
+                        ttTime = new Date(data.flight_arrival_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                        ttNote = `Vuelo ${data?.flight_number || ''} aterrizado. Llegada confirmada.`;
+                      }
+
+                      // Mostrar tooltip si ya pasamos/estamos en el paso Y hay info
+                      const showTooltip = isPassed && (ttTime || ttNote);
 
                       return (
                         <div className={`saas-node ${isPassed ? 'passed' : ''} ${isCurrent ? 'current' : ''}`} key={stepId}>
@@ -236,16 +259,16 @@ export default function ClientShipmentDetail() {
                             </div>
                             
                             {/* HOVER TOOLTIP CORPORATIVO */}
-                            {milestoneData && (
+                            {showTooltip && (
                               <div className="ff-tooltip-content loc-tooltip step-tooltip">
                                 <div className="tt-header">
                                   <strong>{stepObj.label}</strong>
-                                  <span className="tt-time">{new Date(milestoneData.at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                  <span className="tt-time">{ttTime}</span>
                                 </div>
-                                {milestoneData.note && (
+                                {ttNote && (
                                   <div className="tt-note">
                                     <MessageSquare size={12} className="tt-icon-note"/> 
-                                    <span>"{milestoneData.note}"</span>
+                                    <span>"{ttNote}"</span>
                                   </div>
                                 )}
                                 <div className="tt-author">Verified by FreshConnect</div>

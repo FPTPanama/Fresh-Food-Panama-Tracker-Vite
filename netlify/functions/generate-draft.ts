@@ -5,18 +5,28 @@ const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SE
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 export const handler = async (event: any) => {
-  const { leadId, emailType = 'intro' } = JSON.parse(event.body || '{}');
+  // Manejo estricto de CORS para evitar errores 500 silenciosos
+  const headers = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS'
+  };
+
+  if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: 'ok' };
+  if (event.httpMethod !== 'POST') return { statusCode: 405, headers, body: 'Method Not Allowed' };
 
   try {
+    const { leadId, emailType = 'intro' } = JSON.parse(event.body || '{}');
+
     // 1. Obtener datos del Lead
     const { data: lead } = await supabase.from('leads_prospecting').select('*').eq('id', leadId).single();
     if (!lead) throw new Error("Lead no encontrado");
 
-    // Identificamos el producto (fallback a Piña Premium si no hay datos)
+    // Identificamos el producto
     const productTarget = (lead.interested_in && lead.interested_in[0]) || 'Piña Premium';
     const isPineapple = productTarget.toLowerCase().includes('piña');
 
-    // 2. Obtener datos de la Empresa para el producto específico
+    // 2. Obtener datos de la Empresa
     const { data: biz } = await supabase
       .from('product_settings')
       .select('*')
@@ -25,17 +35,17 @@ export const handler = async (event: any) => {
 
     if (!biz) throw new Error(`Sin configuración para: ${productTarget}`);
 
-const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    // Usamos el modelo 2.5-flash por estabilidad, puedes cambiar a 3.1-flash-lite-preview si prefieres
+    const model = genAI.getGenerativeModel({ model: "gemini-3.1-flash-lite-preview" });
 
-    // 3. Lógica Lingüística
-    const isSpain = lead.country_code === 'ES';
-    const lang = isSpain ? 'ESPAÑOL' : 'INGLÉS (English)';
+    // 3. Lógica Lingüística (Leyendo la columna correcta de Supabase)
+    const lang = lead.preferred_language === 'en' ? 'INGLÉS (English)' : 'ESPAÑOL';
     
-    const culturalContext = isSpain 
+    const culturalContext = lang === 'ESPAÑOL' 
       ? "Usa 'Ustedes'. Prohibido el 'vosotros/vuestro'. Tono profesional latinoamericano." 
       : "High-level B2B professional English. Use 'You' (formal). Direct and clear value proposition.";
 
-    // 4. Estrategias Dinámicas (Se alimentan de la DB para evitar errores de referencia)
+    // 4. Estrategias Dinámicas
     const strategies: Record<string, string> = {
       intro: `Enfoque: Calidad Boutique y Origen. 
               Menciona: Producto cosechado bajo demanda para máxima frescura.
@@ -55,60 +65,92 @@ const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
     };
     const currentStrategy = strategies[emailType] || strategies['intro'];
 
-    // 5. El Prompt Maestro con la regla Anti-Firma y Anti-Saludos Poéticos
+    // 5. Prompt Maestro con Reglas Estrictas
     const prompt = `
-      Eres un vendedor B2B francotirador. Vas a redactar el CUERPO de un correo de venta directa a ${lead.company_name} en ${lead.city}.
+      Eres un vendedor B2B francotirador. Vas a redactar un correo de venta directa a ${lead.company_name} en ${lead.city}.
 
-      REGLA DE IDIOMA: Redacta TODO el correo (Asunto y Cuerpo) estrictamente en ${lang}.
+      REGLA DE IDIOMA: Redacta TODO el correo estrictamente en ${lang}.
 
       CONTEXTO DEL NEGOCIO:
       - Empresa: ${biz.company_name} (website: ${biz.website}).
       - Producto: ${biz.product_name}.
       - Ventajas: ${biz.usp_1} | ${biz.usp_2}.
       - Logística: Salidas desde Tocumen (PTY), Panamá.
-      ${isPineapple ? '- Tiempo: <48h desde cosecha al aeropuerto de destino.' : '- Tiempos optimizados de cadena de frío.'}
-      - Tecnología: Trazabilidad en vivo "Fresh Connect".
+      ${isPineapple ? '- Tiempo: <48h desde cosecha al aeropuerto.' : '- Tiempos optimizados de cadena de frío.'}
 
-      OFERTA O MOTIVO DEL CORREO:
+      OFERTA:
       ${currentStrategy}
 
-      REGLAS DE REDACCIÓN "ANTI-FLUFF" (¡CUMPLE ESTO AL 100%!):
-      1. ESTILO DIRECTO Y HUMANO: Escribe como una persona real en su oficina. Cero lenguaje poético, cero adornos corporativos. PROHIBIDO usar palabras como "delighted to announce", "esteemed", "meticulously", "pride ourselves", "valued partners". 
-      2. PROHIBIDO SALUDAR POÉTICAMENTE: NO digas "I hope this email finds you well", "I trust this email finds you well", "Espero que estés bien", ni "Dear...". Inicia directamente con un saludo simple ("Hi ${lead.company_name} team," o "Hola equipo de ${lead.company_name},") y ve al grano en la misma línea.
-      3. LONGITUD EXTREMA: El comprador no tiene tiempo. Máximo 4 a 5 oraciones cortas en todo el correo. Ve directo al grano desde la primera línea.
-      4. TONO: ${culturalContext}. Transaccional, profesional, pero conversacional. 
-      5. PROHIBIDO FIRMAR: NO escribas "Sincerely", "Best regards", ni tu nombre al final. Yo pondré la firma mediante código.
-      6. ASUNTO: Primera línea debe decir "ASUNTO: [Asunto directo, sin clickbait, max 5 palabras en ${lang}]".
-      7. No uses corchetes [ ] en el texto final. 
-      8. Recuerda: Mercamadrid o Mercabarna son centros logísticos, no ciudades.
+      REGLAS DE REDACCIÓN "ANTI-FLUFF":
+      1. LA PRIMERA LÍNEA DEBE SER EL ASUNTO: "ASUNTO: [Asunto directo y persuasivo en ${lang}]".
+      2. PROHIBIDO SALUDAR POÉTICAMENTE: Nada de "I hope this finds you well". Inicia directamente con "Hola equipo de ${lead.company_name}," y ve al grano.
+      3. LONGITUD: Máximo 4 a 5 oraciones.
+      4. TONO: ${culturalContext}. Transaccional, profesional. 
+      5. NO FIRMES: NO escribas "Sincerely", "Best regards", ni tu nombre al final.
     `;
 
     const result = await model.generateContent(prompt);
-    let rawDraft = result.response.text();
+    let rawResponse = result.response.text().trim();
 
-    // ------------------------------------------------------------------
-    // EL "FILTRO ANTI-IA" Y LA INYECCIÓN DE FIRMA DINÁMICA
-    // ------------------------------------------------------------------
-    
-    // 1. Cortar cualquier despedida y saludos poéticos residuales
-    rawDraft = rawDraft.replace(/(Sincerely|Best regards|Regards|Atentamente|Saludos cordiales|Un saludo|Thank you|Gracias por su atención|I trust this email|I hope this email)[\s\S]*/gi, '').trim();
+    // 6. Separación de Asunto y Cuerpo
+    let dynamicSubject = `Oportunidad B2B - ${biz.company_name}`;
+    let emailBody = rawResponse;
 
-    // 2. Construir la firma de forma manual y limpia 
-    const signature = `\n\n--\n${biz.sender_name}\nDirector de Exportaciones | ${biz.company_name}\nWhatsApp: +507 6000-0000\nWeb: ${biz.website}`;
+    const lines = rawResponse.split('\n');
+    if (lines[0].toUpperCase().includes('ASUNTO:')) {
+      dynamicSubject = lines[0].replace(/ASUNTO:/i, '').trim();
+      emailBody = lines.slice(1).join('\n').trim();
+    } else if (lines[0].toUpperCase().includes('SUBJECT:')) {
+      dynamicSubject = lines[0].replace(/SUBJECT:/i, '').trim();
+      emailBody = lines.slice(1).join('\n').trim();
+    }
 
-    // 3. Unir el cuerpo limpio con la firma impecable
-    const finalDraftText = rawDraft + signature;
+    // Filtro Anti-IA
+    emailBody = emailBody.replace(/(Sincerely|Best regards|Regards|Atentamente|Saludos cordiales|Un saludo|Thank you|Gracias por su atención)[\s\S]*/gi, '').trim();
 
-    // 6. Guardar borrador final en Supabase
+    // 7. Envoltura Spam-Proof
+    const plainTextSignature = `\n\n--\n${biz.sender_name}\nDirector de Exportaciones | ${biz.company_name}\nWhatsApp: +507 6000-0000\nWeb: ${biz.website}\n\n---\nEste es un correo comercial B2B. Si deseas dejar de recibir nuestras alertas, responde "Baja".`;
+    const finalPlainText = emailBody + plainTextSignature;
+
+    const htmlBody = emailBody.replace(/\n/g, '<br>');
+    const emailHtml = `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14px; color: #1e293b; max-width: 600px; margin: 0 auto; padding: 20px;">
+        ${htmlBody}
+        <br><br>--<br>
+        <strong>${biz.sender_name}</strong><br>
+        Director de Exportaciones | ${biz.company_name}<br>
+        WhatsApp: +507 6303-6338<br>
+        <a href="${biz.website}" style="color: #d17711; text-decoration: none;">${biz.website}</a>
+        <hr style="border: none; border-top: 1px solid #e2e8f0; margin-top: 30px; margin-bottom: 20px;" />
+        <p style="font-size: 11px; color: #94a3b8; text-align: center; line-height: 1.4;">
+          Este es un correo comercial operativo. Si no eres la persona adecuada en compras o deseas dejar de recibir nuestras actualizaciones de disponibilidad, simplemente responde a este correo con la palabra <strong>"Baja"</strong>.
+        </p>
+      </div>
+    `;
+
+    // 8. Guardar en Supabase (Guardamos la versión HTML formateada)
     await supabase.from('leads_prospecting').update({ 
-      email_draft: finalDraftText,
+      email_draft: emailHtml,
       last_email_type: emailType 
     }).eq('id', leadId);
 
-    return { statusCode: 200, body: JSON.stringify({ draft: finalDraftText }) };
+    // Devolvemos toda la información útil al frontend
+    return { 
+      statusCode: 200, 
+      headers,
+      body: JSON.stringify({ 
+        subject: dynamicSubject,
+        draft: emailHtml,
+        textFallback: finalPlainText 
+      }) 
+    };
 
   } catch (err: any) {
     console.error("Error en Generator:", err.message);
-    return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
+    return { 
+      statusCode: 500, 
+      headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: err.message }) 
+    };
   }
 };
