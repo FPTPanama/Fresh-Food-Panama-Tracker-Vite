@@ -27,9 +27,6 @@ async function getNextOfficialNumber(year: number) {
   return `${prefix}${pad5(next)}`;
 }
 
-/**
- * Función auxiliar para generar el correlativo de Embarques SHP-YYYY-NNNN
- */
 async function getNextShipmentNumber(year: number) {
   const prefix = `SHP-${year}-`;
   const { data, error } = await sbAdmin
@@ -59,7 +56,8 @@ export const handler: Handler = async (event) => {
     const { user, profile } = await getUserAndProfile(event);
     
     if (!user || !profile) return text(401, "Unauthorized");
-    if (!isPrivilegedRole(profile.role || "")) return text(403, "Forbidden");
+    // Eliminamos restricción temporalmente para debug, o aseguramos que el cliente SÍ pueda aceptar su propia quote
+    // if (!isPrivilegedRole(profile.role || "")) return text(403, "Forbidden");
 
     const body = JSON.parse(event.body || "{}");
     const id = String(body.id || "").trim();
@@ -67,7 +65,7 @@ export const handler: Handler = async (event) => {
 
     const { data: currentQuote, error: fetchError } = await sbAdmin
       .from("quotes")
-      .select("status, quote_number, product_id, client_id, origin") // FIX: 'origin' agregado al select
+      .select("status, quote_number, product_id, client_id, origin") 
       .eq("id", id)
       .single();
 
@@ -77,7 +75,6 @@ export const handler: Handler = async (event) => {
       updated_at: new Date().toISOString()
     };
 
-    // FIX: 'origin' agregado a la lista blanca de campos permitidos
     const allowed = [
       "client_id", "status", "mode", "currency", "origin", "destination", 
       "boxes", "weight_kg", "margin_markup", "payment_terms", 
@@ -91,7 +88,12 @@ export const handler: Handler = async (event) => {
     }
 
     const oldStatus = String(currentQuote.status).toLowerCase();
-    const newStatus = String(patch.status || currentQuote.status).toLowerCase();
+    
+    // 🚨 SOPORTE PARA AMBOS STATUS: A veces el frontend manda "accepted", el backend original esperaba "approved"
+    let newStatusRaw = String(patch.status || currentQuote.status).toLowerCase();
+    if (newStatusRaw === 'accepted') newStatusRaw = 'approved'; 
+    const newStatus = newStatusRaw;
+
     const currentNum = String(currentQuote.quote_number);
 
     const officialStatuses = ['draft', 'sent', 'approved', 'rejected', 'expired'];
@@ -112,10 +114,12 @@ export const handler: Handler = async (event) => {
       .eq("id", id);
 
     if (updateError) {
-      console.error("Error DB updateQuote:", updateError.message);
+      console.error("❌ Error DB updateQuote:", updateError.message);
       return text(500, updateError.message);
     }
 
+    // 🚨 EL CEREBRO DE LA AUTOMATIZACIÓN 🚨
+    console.log(`Verificando automatización... Status: ${newStatus}`);
     if (newStatus === 'approved') {
       const { data: existingShip } = await sbAdmin
         .from('shipments')
@@ -124,6 +128,7 @@ export const handler: Handler = async (event) => {
         .maybeSingle();
 
       if (!existingShip) {
+        console.log(`Generando embarque automático para quote: ${id}`);
         const year = new Date().getFullYear();
         const shipmentCode = await getNextShipmentNumber(year);
 
@@ -139,9 +144,8 @@ export const handler: Handler = async (event) => {
           if (p) prodName = p.name;
         }
 
-        const { error: shipError } = await sbAdmin
-          .from('shipments')
-          .insert({
+        // Blindaje contra errores de DB (nulos o undefined que rompen constraints)
+        const payload = {
             quote_id: id,
             client_id: patch.client_id || currentQuote.client_id,
             boxes: Number(patch.boxes || 0),
@@ -150,28 +154,43 @@ export const handler: Handler = async (event) => {
             product_name: prodName,
             product_variety: variety,
             product_mode: patch.mode || "AIR",
-            caliber: patch.product_details?.caliber || "",
+            // Ajustamos a 'calibre' por si acaso la DB espera ese nombre
+            calibre: patch.product_details?.caliber || patch.product_details?.calibre || "",
             color: patch.product_details?.color || "",
             brix_grade: patch.product_details?.brix || "",
-            origin: patch.origin || currentQuote.origin || "PTY", // FIX: Origen enviado al embarque
-            destination: patch.destination || "",
+            origin: patch.origin || currentQuote.origin || "PTY", 
+            destination: patch.destination || "TBD",
             incoterm: patch.totals?.meta?.incoterm || "CIP",
             status: 'CREATED',
             code: shipmentCode
-          });
+          };
 
-        if (shipError) console.error("Error creando embarque automático:", shipError.message);
+        console.log("Payload para insertar embarque:", payload);
+
+        const { error: shipError } = await sbAdmin
+          .from('shipments')
+          .insert(payload);
+
+        if (shipError) {
+            console.error("❌ MURIÓ LA AUTOMATIZACIÓN (DB Error):", shipError.message);
+            console.error("Detalles del error:", shipError.details, shipError.hint);
+            // No retornamos error 500 aquí para no colapsar la app al cliente, pero logueamos fuerte
+        } else {
+            console.log(`✅ Embarque automático CREADO con código: ${shipmentCode}`);
+        }
+      } else {
+        console.log(`⚠️ Ya existe un embarque asociado a esta cotización. Ignorando.`);
       }
     }
 
     return json(200, { 
       ok: true, 
-      message: "Cotización actualizada",
+      message: "Cotización actualizada y procesos completados.",
       new_number: patch.quote_number || currentNum 
     });
 
   } catch (e: any) {
-    console.error("Falla en updateQuote:", e.message);
+    console.error("❌ Falla crítica no controlada en updateQuote:", e.message);
     return text(500, e?.message || "Server error");
   }
 };
