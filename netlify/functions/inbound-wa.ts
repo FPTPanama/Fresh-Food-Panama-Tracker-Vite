@@ -48,7 +48,7 @@ export const handler: Handler = async (event) => {
     console.log(`\n📩 CHATOPS IN: "${incomingMessage}" de ${senderNumber}`);
 
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-3.1-flash", 
+      model: "gemini-3.1-flash-lite-preview", 
       generationConfig: { responseMimeType: "application/json" }
     });
 
