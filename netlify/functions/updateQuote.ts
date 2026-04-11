@@ -78,7 +78,7 @@ export const handler: Handler = async (event) => {
     const allowed = [
       "client_id", "status", "mode", "currency", "origin", "destination", 
       "boxes", "weight_kg", "margin_markup", "payment_terms", 
-      "terms", "client_snapshot", "costs", "totals", "product_id", "product_details"
+      "terms", "client_snapshot", "costs", "totals", "product_id", "product_details", "valid_until"
     ];
 
     for (const k of allowed) {

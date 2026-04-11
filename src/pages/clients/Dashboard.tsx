@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { 
   TrendingUp, MessageSquare, Ship, ChevronRight,
   Plus, Package, Hash, Building2, FileText, Plane, CheckCircle2, AlertCircle,
-  Headset
+  Headset, Inbox
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { ClientLayout } from "@/components/ClientLayout";
@@ -25,8 +25,8 @@ const getStatusConfig = (status: string, type: 'shipment' | 'quote', lang: 'es' 
   } else {
     switch(s) {
       case 'draft': return { label: lang === 'es' ? 'BORRADOR' : 'DRAFT', class: 'bg-slate-100 text-slate-600' };
-      case 'solicitud': return { label: lang === 'es' ? 'NUEVA SOLICITUD' : 'NEW REQUEST', class: 'bg-orange-100 text-orange-700 border-orange' };
-      case 'sent': return { label: lang === 'es' ? 'REVISIÓN' : 'REVIEW', class: 'bg-sky-100 text-sky-700' };
+      case 'solicitud': return { label: lang === 'es' ? 'EN REVISIÓN' : 'IN REVIEW', class: 'bg-orange-100 text-orange-700 border-orange' };
+      case 'sent': return { label: lang === 'es' ? 'ESPERANDO APROBACIÓN' : 'PENDING APPROVAL', class: 'bg-sky-100 text-sky-700' };
       case 'approved': return { label: lang === 'es' ? 'APROBADA' : 'APPROVED', class: 'bg-emerald-100 text-emerald-700' };
       case 'rejected': return { label: lang === 'es' ? 'RECHAZADA' : 'REJECTED', class: 'bg-rose-100 text-rose-700' };
       default: return { label: s.toUpperCase(), class: 'bg-gray-100 text-gray-600' };
@@ -90,11 +90,26 @@ export default function ClientDashboard() {
           initial: client.name?.charAt(0).toUpperCase()
         });
 
-        // FIX ARQUITECTURA: Ahora extraemos totals (JSON) y filtramos borradores
+        // 🚨 FILTRO BLINDADO (NEQ ENCADENADOS)
         const [quotesRes, shipmentsRes, allQuotesStats] = await Promise.all([
-          supabase.from('quotes').select('*').eq('client_id', client.id).neq('status', 'draft').order('created_at', { ascending: false }).limit(6),
-          supabase.from('shipments').select(`*, milestones (type, at, note)`).eq('client_id', client.id).not('status', 'in', '("delivered", "cancelled", "AT_DESTINATION")').order('created_at', { ascending: false }).limit(6),
-          supabase.from('quotes').select('total, totals, boxes, status').eq('client_id', client.id).neq('status', 'draft')
+          supabase.from('quotes').select('*')
+            .eq('client_id', client.id)
+            .neq('status', 'draft')     // No borradores
+            .neq('status', 'archived')  // No archivados
+            .order('created_at', { ascending: false }).limit(6),
+          
+          supabase.from('shipments').select(`*, milestones (type, at, note)`)
+            .eq('client_id', client.id)
+            .neq('status', 'delivered')
+            .neq('status', 'cancelled')
+            .neq('status', 'CANCELLED')
+            .neq('status', 'AT_DESTINATION')
+            .order('created_at', { ascending: false }).limit(6),
+          
+          supabase.from('quotes').select('total, totals, boxes, status')
+            .eq('client_id', client.id)
+            .neq('status', 'draft')     // Estadísticas sin borradores
+            .neq('status', 'archived')  // Estadísticas sin archivados
         ]);
 
         const allQuotes = allQuotesStats.data || [];
@@ -105,7 +120,6 @@ export default function ClientDashboard() {
           stats: {
             totalBoxes: approvedQuotes.reduce((acc, q) => acc + (Number(q.boxes) || 0), 0),
             pendingQuotes: allQuotes.filter(q => q.status === 'sent' || q.status === 'Solicitud').length,
-            // FIX ARQUITECTURA: Extraemos el valor seguro de totals.total
             totalInvestment: approvedQuotes.reduce((acc, q) => acc + (Number(q.totals?.total) || Number(q.total) || 0), 0),
             newToReview: pendingToReview
           },
@@ -161,8 +175,8 @@ export default function ClientDashboard() {
               <span className="c-name">{clientProfile?.name}</span>
             </div>
             <div className="c-tags">
-              <span className="c-tag"><Hash size={10}/> {clientProfile?.systemId}</span>
-              <span className="c-tag"><Building2 size={10}/> {clientProfile?.taxId}</span>
+              <span className="c-tag" title="System ID"><Hash size={10}/> {clientProfile?.systemId}</span>
+              <span className="c-tag" title="Tax ID"><Building2 size={10}/> {clientProfile?.taxId}</span>
             </div>
           </div>
 
@@ -186,19 +200,22 @@ export default function ClientDashboard() {
           </div>
         </div>
 
-        {/* HERO: MÉTRICAS COMPACTAS */}
+        {/* HERO: MÉTRICAS REDISEÑADAS */}
         <div className="ff-hero-metrics">
-          <div className="metric-card highlight">
-            <span className="m-label"><TrendingUp size={12}/> {lang === 'es' ? 'Inversión Histórica' : 'Total Investment'}</span>
+          <div className="metric-card">
+            <span className="m-label"><TrendingUp size={14}/> {lang === 'es' ? 'Inversión Histórica' : 'Total Investment'}</span>
             <span className="m-value">{formatCurrency(data.stats.totalInvestment)}</span>
           </div>
-          <div className="metric-card neutral">
-            <span className="m-label"><Package size={12}/> {lang === 'es' ? 'Volumen Recibido' : 'Volume Received'}</span>
+          <div className="metric-card">
+            <span className="m-label"><Package size={14}/> {lang === 'es' ? 'Volumen Recibido' : 'Volume Received'}</span>
             <span className="m-value">{data.stats.totalBoxes.toLocaleString()} <span className="m-sub">{lang === 'es' ? 'Cajas' : 'Boxes'}</span></span>
           </div>
-          <div className="metric-card success">
-            <span className="m-label"><Ship size={12}/> {lang === 'es' ? 'Logística en Curso' : 'Active Logistics'}</span>
-            <span className="m-value-small">{data.activeShipments.length} {lang === 'es' ? 'Embarques' : 'Shipments'}</span>
+          <div className="metric-card">
+            <span className="m-label"><Ship size={14}/> {lang === 'es' ? 'Logística en Curso' : 'Active Logistics'}</span>
+            <div className="m-value-flex">
+              <span className="m-value-small">{data.activeShipments.length}</span>
+              <span className="m-sub">{lang === 'es' ? 'Embarques Activos' : 'Active Shipments'}</span>
+            </div>
           </div>
         </div>
 
@@ -209,10 +226,10 @@ export default function ClientDashboard() {
           <section className="ff-panel">
             <div className="section-header">
               <h3 className="live-header">
-                <Ship size={14}/> {lang === 'es' ? 'Tránsitos Activos' : 'Active Transits'}
+                <Ship size={16} color="#0f766e"/> {lang === 'es' ? 'Tránsitos Activos' : 'Active Transits'}
                 {data.activeShipments.length > 0 && <span className="live-ping" title="En Vivo"></span>}
               </h3>
-              <button onClick={() => navigate('/clients/shipments')}>{lang === 'es' ? 'Ver todos' : 'View all'}</button>
+              {data.activeShipments.length > 0 && <button onClick={() => navigate('/clients/shipments')}>{lang === 'es' ? 'Ver todos' : 'View all'}</button>}
             </div>
             
             <div className="ff-table-list">
@@ -228,7 +245,6 @@ export default function ClientDashboard() {
                     </div>
                     <div className="col-dest">{s.destination}</div>
                     
-                    {/* Stepper Lineal Compacto */}
                     <div className="col-stepper-mini">
                       <div className="stepper-track">
                         <div className="stepper-fill" style={{ width: `${progressPct}%` }}></div>
@@ -236,11 +252,14 @@ export default function ClientDashboard() {
                       <span className="stepper-lbl">{STEPS[currentIdx].label}</span>
                     </div>
 
-                    <ChevronRight size={14} className="row-arrow" />
+                    <ChevronRight size={16} className="row-arrow" />
                   </div>
                 );
               }) : (
-                <div className="ff-empty-state">{lang === 'es' ? 'No hay embarques en tránsito.' : 'No active shipments.'}</div>
+                <div className="ff-empty-state">
+                  <div className="empty-icon"><Ship size={24} /></div>
+                  <p>{lang === 'es' ? 'No hay operaciones logísticas en curso.' : 'No active shipments.'}</p>
+                </div>
               )}
             </div>
           </section>
@@ -248,35 +267,36 @@ export default function ClientDashboard() {
           {/* COTIZACIONES PENDIENTES / RECIENTES */}
           <section className="ff-panel">
             <div className="section-header">
-              <h3><FileText size={14}/> {lang === 'es' ? 'Gestiones Recientes' : 'Recent Quotes'}</h3>
-              <button onClick={() => navigate('/clients/quotes')}>{lang === 'es' ? 'Historial' : 'History'}</button>
+              <h3><FileText size={16} color="#0f766e"/> {lang === 'es' ? 'Gestiones Recientes' : 'Recent Quotes'}</h3>
+              {data.recentQuotes.length > 0 && <button onClick={() => navigate('/clients/quotes')}>{lang === 'es' ? 'Ver historial' : 'View history'}</button>}
             </div>
             
             <div className="ff-table-list">
               {data.recentQuotes.length > 0 ? data.recentQuotes.map(q => {
                 const statusConfig = getStatusConfig(q.status, 'quote', lang as 'es' | 'en');
-                // FIX ARQUITECTURA: Extraemos el valor del JSON totals?.total
                 const quoteTotal = q.totals?.total || q.total || 0;
                 
                 return (
                   <div key={q.id} className={`ff-list-row quote ${q.status === 'sent' ? 'urgent' : ''}`} onClick={() => navigate(`/clients/quotes/${q.id}`)}>
                     <div className="col-code">
                       <div className="row-icon-box"><FileText size={14} className="row-icon" /></div>
-                      <span className="code-text">{q.quote_number || 'NUEVA'}</span>
+                      <span className="code-text">{q.quote_number || 'SOLICITUD'}</span>
                     </div>
                     <div className="col-dest">{q.destination}</div>
                     
-                    {/* Renderizamos el total corregido */}
                     <div className="col-amount">{formatCurrency(quoteTotal)}</div>
                     
                     <div className="col-status">
                       <span className={`status-badge ${statusConfig.class}`}>{statusConfig.label}</span>
                     </div>
-                    <ChevronRight size={14} className="row-arrow" />
+                    <ChevronRight size={16} className="row-arrow" />
                   </div>
                 );
               }) : (
-                <div className="ff-empty-state">{lang === 'es' ? 'No hay cotizaciones pendientes.' : 'No pending quotes.'}</div>
+                <div className="ff-empty-state">
+                  <div className="empty-icon"><Inbox size={24} /></div>
+                  <p>{lang === 'es' ? 'No hay cotizaciones pendientes.' : 'No pending quotes.'}</p>
+                </div>
               )}
             </div>
           </section>
@@ -285,86 +305,84 @@ export default function ClientDashboard() {
 
         <CustomerQuoteModal isOpen={isQuoteModalOpen} onClose={handleCloseModal} />
         
-        {/* CSS COMPACTO Y "SLEEK" */}
-        <style>{`
-          .ff-dashboard-v2 { display: flex; flex-direction: column; gap: 24px; padding-bottom: 40px; font-family: 'Poppins', sans-serif !important; }
+        {/* CSS PULIDO Y MEJORADO */}
+        <style dangerouslySetInnerHTML={{__html: `
+          .ff-dashboard-v2 { display: flex; flex-direction: column; gap: 24px; padding-bottom: 40px; font-family: 'Inter', 'Poppins', sans-serif !important; }
           
-          /* TOP BAR & PROFILE COMPACTO */
-          .ff-top-bar { display: flex; justify-content: space-between; align-items: center; }
+          /* TOP BAR */
+          .ff-top-bar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;}
           
-          .ff-client-badge { display: flex; align-items: center; gap: 12px; background: white; padding: 8px 16px 8px 8px; border-radius: 999px; border: 1px solid rgba(34,76,34,0.08); box-shadow: 0 2px 10px rgba(0,0,0,0.02);}
-          .c-avatar { width: 32px; height: 32px; background: #f8fafc; border-radius: 50%; display: grid; place-items: center; font-size: 14px; font-weight: 800; color: var(--ff-green-dark); overflow: hidden; border: 1px solid #e2e8f0;}
+          .ff-client-badge { display: flex; align-items: center; gap: 12px; background: white; padding: 6px 16px 6px 6px; border-radius: 999px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.04);}
+          .c-avatar { width: 36px; height: 36px; background: #f8fafc; border-radius: 50%; display: grid; place-items: center; font-size: 14px; font-weight: 800; color: var(--ff-green-dark); overflow: hidden; border: 1px solid #e2e8f0;}
           .c-avatar img { width: 100%; height: 100%; object-fit: contain; padding: 2px;}
           .c-info { display: flex; flex-direction: column; }
-          .c-greeting { font-size: 9px; font-weight: 800; color: #94a3b8; text-transform: uppercase; line-height: 1;}
+          .c-greeting { font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; line-height: 1;}
           .c-name { font-size: 13px; font-weight: 800; color: var(--ff-green-dark); line-height: 1.2; margin-top: 2px;}
           .c-tags { display: flex; gap: 6px; margin-left: 8px; border-left: 1px solid #e2e8f0; padding-left: 12px;}
-          .c-tag { font-size: 10px; font-weight: 600; color: #64748b; font-family: 'JetBrains Mono', monospace; display: flex; align-items: center; gap: 4px; background: #f1f5f9; padding: 2px 8px; border-radius: 4px;}
+          .c-tag { font-size: 10px; font-weight: 600; color: #64748b; font-family: 'JetBrains Mono', monospace; display: flex; align-items: center; gap: 4px; background: #f8fafc; padding: 4px 8px; border-radius: 6px;}
 
-          .ff-alert-hubs { display: flex; gap: 10px; }
-          .alert-pill { position: relative; background: white; border: 1px solid rgba(34, 76, 34, 0.1); padding: 8px 16px; border-radius: 10px; display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; font-weight: 700; color: var(--ff-green-dark); transition: 0.2s; }
-          .alert-pill:hover { border-color: var(--ff-green-dark); box-shadow: 0 4px 12px rgba(34,76,34,0.05); }
-          .alert-pill.support { border-color: rgba(16, 185, 129, 0.3); color: #047857; background: #f0fdf4; }
-          .alert-pill.support:hover { border-color: #10b981; }
+          .ff-alert-hubs { display: flex; gap: 10px; align-items: center;}
+          .alert-pill { position: relative; background: white; border: 1px solid #e2e8f0; padding: 8px 16px; border-radius: 10px; display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; font-weight: 700; color: var(--ff-green-dark); transition: all 0.2s ease; box-shadow: 0 1px 2px rgba(0,0,0,0.02);}
+          .alert-pill:hover { border-color: #cbd5e1; box-shadow: 0 4px 12px rgba(0,0,0,0.05); transform: translateY(-1px);}
+          .alert-pill.support { border-color: #bbf7d0; color: #047857; background: #f0fdf4; }
+          .alert-pill.support:hover { border-color: #34d399; }
 
-          .dot-pulse { position: absolute; top: -3px; right: -3px; width: 10px; height: 10px; border-radius: 50%; border: 2px solid white; }
+          .dot-pulse { position: absolute; top: -4px; right: -4px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; }
           .dot-pulse.orange { background: var(--ff-orange); animation: pulse-orange 1.5s infinite; }
           @keyframes pulse-orange { 0% { box-shadow: 0 0 0 0 rgba(209, 119, 17, 0.7); } 100% { box-shadow: 0 0 0 6px rgba(209, 119, 17, 0); } }
 
-          .btn-create { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 10px; font-size: 12px; font-weight: 700; cursor: pointer; transition: all 0.2s ease; }
-          .btn-create.main { background: var(--ff-green-dark); color: white; border: none; box-shadow: 0 4px 10px rgba(34, 76, 34, 0.2); }
-          .btn-create.main:hover { background: #16361a; box-shadow: 0 6px 15px rgba(34, 76, 34, 0.3); transform: translateY(-1px); }
+          .btn-create { display: flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 10px; font-size: 12px; font-weight: 700; cursor: pointer; transition: all 0.2s ease; }
+          .btn-create.main { background: var(--ff-green-dark); color: white; border: none; box-shadow: 0 2px 8px rgba(34, 76, 34, 0.25); }
+          .btn-create.main:hover { background: #16361a; box-shadow: 0 4px 12px rgba(34, 76, 34, 0.35); transform: translateY(-1px); }
 
-          /* HERO METRICS */
-          .ff-hero-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-          .metric-card { background: white; padding: 20px; border-radius: 16px; border: 1px solid rgba(34, 76, 34, 0.08); display: flex; flex-direction: column; gap: 6px; box-shadow: 0 2px 10px rgba(0,0,0,0.02); transition: 0.2s; }
-          .metric-card:hover { transform: translateY(-2px); box-shadow: 0 6px 15px rgba(34,76,34,0.04); }
-          .metric-card.highlight { border-left: 4px solid var(--ff-orange); }
-          .metric-card.success { border-left: 4px solid var(--ff-green); }
-          .metric-card.neutral { border-left: 4px solid var(--ff-green-dark); }
+          /* HERO METRICS REDISEÑO */
+          .ff-hero-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+          .metric-card { background: white; padding: 22px; border-radius: 16px; border: 1px solid #e2e8f0; display: flex; flex-direction: column; justify-content: center; gap: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); transition: all 0.2s ease; }
+          .metric-card:hover { transform: translateY(-2px); box-shadow: 0 8px 16px rgba(0,0,0,0.06); border-color: #cbd5e1; }
           
-          .m-label { font-size: 10px; font-weight: 800; color: var(--ff-green-dark); opacity: 0.6; text-transform: uppercase; display: flex; align-items: center; gap: 6px; }
-          .m-value { font-size: 24px; font-weight: 800; color: var(--ff-green-dark); letter-spacing: -0.5px; }
-          .m-value-small { font-size: 20px; font-weight: 800; color: var(--ff-green-dark); }
-          .m-sub { font-size: 14px; font-weight: 600; color: #94a3b8; letter-spacing: 0; }
+          .m-label { font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; display: flex; align-items: center; gap: 6px; }
+          .m-value { font-size: 28px; font-weight: 800; color: #0f172a; letter-spacing: -0.5px; line-height: 1;}
+          .m-value-flex { display: flex; align-items: baseline; gap: 6px; }
+          .m-value-small { font-size: 28px; font-weight: 800; color: #0f172a; line-height: 1;}
+          .m-sub { font-size: 13px; font-weight: 600; color: #94a3b8; letter-spacing: 0; }
 
           /* TABLAS Y PANELES */
           .ff-main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-          .ff-panel { background: white; border-radius: 20px; border: 1px solid rgba(34,76,34,0.08); padding: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.02); }
-          .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-          .section-header h3 { font-size: 12px; font-weight: 800; color: var(--ff-green-dark); text-transform: uppercase; display: flex; align-items: center; gap: 8px; margin: 0; }
-          .section-header button { font-size: 11px; font-weight: 700; color: var(--ff-green); background: none; border: none; cursor: pointer; transition: 0.2s; }
-          .section-header button:hover { color: var(--ff-green-dark); }
+          .ff-panel { background: white; border-radius: 16px; border: 1px solid #e2e8f0; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+          .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+          .section-header h3 { font-size: 13px; font-weight: 800; color: #0f172a; text-transform: uppercase; display: flex; align-items: center; gap: 8px; margin: 0; letter-spacing: 0.5px;}
+          .section-header button { font-size: 12px; font-weight: 700; color: #0f766e; background: none; border: none; cursor: pointer; transition: 0.2s; padding: 4px 8px; border-radius: 6px;}
+          .section-header button:hover { background: #f0fdfa; }
           
           .live-header { position: relative; }
-          .live-ping { display: inline-block; width: 6px; height: 6px; background: var(--ff-green); border-radius: 50%; margin-left: 6px; animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite; }
+          .live-ping { display: inline-block; width: 8px; height: 8px; background: #10b981; border-radius: 50%; margin-left: 6px; animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite; }
           @keyframes ping { 75%, 100% { transform: scale(2); opacity: 0; } }
 
-          .ff-table-list { display: flex; flex-direction: column; gap: 8px; }
-          .ff-list-row { display: flex; align-items: center; padding: 10px 14px; background: #fcfdfc; border: 1px solid rgba(34,76,34,0.05); border-radius: 12px; cursor: pointer; transition: all 0.2s ease; gap: 12px; }
-          .ff-list-row:hover { border-color: var(--ff-green); background: white; transform: translateY(-1px); box-shadow: 0 4px 10px rgba(34,76,34,0.04); }
+          .ff-table-list { display: flex; flex-direction: column; gap: 10px; }
+          .ff-list-row { display: flex; align-items: center; padding: 12px 16px; background: #fff; border: 1px solid #f1f5f9; border-radius: 12px; cursor: pointer; transition: all 0.2s ease; gap: 12px; }
+          .ff-list-row:hover { border-color: #cbd5e1; background: #f8fafc; transform: translateY(-1px); box-shadow: 0 4px 10px rgba(0,0,0,0.04); }
           .ff-list-row.urgent { background: #fffbeb; border-color: #fde68a; }
-          .ff-list-row.urgent:hover { border-color: var(--ff-orange); }
+          .ff-list-row.urgent:hover { border-color: #f59e0b; box-shadow: 0 4px 10px rgba(245,158,11,0.1); }
           
-          .col-code { min-width: 110px; display: flex; align-items: center; gap: 8px; }
-          .code-text { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; color: var(--ff-green-dark); }
+          .col-code { min-width: 120px; display: flex; align-items: center; gap: 10px; }
+          .code-text { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; color: #1e293b; }
           
-          .row-icon-box { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 6px; flex-shrink: 0; }
+          .row-icon-box { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0; }
           .row-icon-box.air { background: #e0f2fe; color: #0284c7; }
           .row-icon-box.sea { background: #f1f5f9; color: #475569; }
-          .row-icon { opacity: 0.4; }
+          .row-icon { opacity: 0.6; }
           
-          .col-dest { flex: 1; font-size: 12px; font-weight: 600; color: var(--ff-green-dark); opacity: 0.9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-          .col-amount { font-size: 13px; font-weight: 700; color: var(--ff-green-dark); min-width: 80px; text-align: right; font-variant-numeric: tabular-nums; }
-          .col-status { min-width: 90px; display: flex; justify-content: flex-end; }
+          .col-dest { flex: 1; font-size: 13px; font-weight: 600; color: #475569; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .col-amount { font-size: 14px; font-weight: 800; color: #0f172a; min-width: 90px; text-align: right; font-variant-numeric: tabular-nums; }
+          .col-status { min-width: 110px; display: flex; justify-content: flex-end; }
           
           /* Mini Stepper */
-          .col-stepper-mini { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; min-width: 100px; }
-          .stepper-track { width: 100%; height: 4px; background: #e2e8f0; border-radius: 2px; overflow: hidden; }
-          .stepper-fill { height: 100%; background: var(--ff-green); border-radius: 2px; transition: width 1s ease; }
-          .stepper-lbl { font-size: 9px; font-weight: 800; color: var(--ff-green-dark); text-transform: uppercase; letter-spacing: 0.5px;}
+          .col-stepper-mini { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; min-width: 110px; }
+          .stepper-track { width: 100%; height: 6px; background: #f1f5f9; border-radius: 3px; overflow: hidden; }
+          .stepper-fill { height: 100%; background: #10b981; border-radius: 3px; transition: width 1s ease; }
+          .stepper-lbl { font-size: 10px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;}
 
-          .status-badge { font-size: 9px; font-weight: 800; padding: 4px 8px; border-radius: 6px; letter-spacing: 0.5px; }
+          .status-badge { font-size: 9.5px; font-weight: 800; padding: 4px 10px; border-radius: 6px; letter-spacing: 0.5px; }
           .bg-slate-100 { background: #f1f5f9; } .text-slate-600 { color: #475569; }
           .bg-amber-100 { background: #fef3c7; } .text-amber-700 { color: #b45309; }
           .bg-blue-100 { background: #dbeafe; } .text-blue-700 { color: #1d4ed8; }
@@ -374,17 +392,52 @@ export default function ClientDashboard() {
           .bg-orange-100 { background: #ffedd5; } .text-orange-700 { color: #c2410c; } .border-orange { border: 1px solid #fed7aa; }
           .bg-rose-100 { background: #ffe4e6; } .text-rose-700 { color: #be123c; }
           
-          .row-arrow { color: var(--ff-green-dark); opacity: 0.2; transition: 0.2s; }
-          .ff-list-row:hover .row-arrow { opacity: 1; transform: translateX(2px); }
+          .row-arrow { color: #94a3b8; transition: 0.2s; margin-left: 4px;}
+          .ff-list-row:hover .row-arrow { color: #0f172a; transform: translateX(3px); }
           
-          .ff-empty-state { padding: 20px; text-align: center; color: var(--ff-green-dark); opacity: 0.5; font-weight: 600; font-size: 12px; background: #f9fbf9; border-radius: 12px; border: 1px dashed rgba(34,76,34,0.1); }
+          /* EMPTY STATES ELEGANTES */
+          .ff-empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; background: #f8fafc; border-radius: 12px; border: 1px dashed #cbd5e1; gap: 12px;}
+          .empty-icon { width: 48px; height: 48px; background: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #cbd5e1; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+          .ff-empty-state p { margin: 0; font-size: 13px; font-weight: 600; color: #64748b; }
 
           /* LOADING */
           .ff-loading-full { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 400px; }
-          .ff-loader-ring { width: 30px; height: 30px; border: 3px solid rgba(34,76,34,0.1); border-top-color: var(--ff-green-dark); border-radius: 50%; animation: spin 1s linear infinite; }
-          .ff-sync-text { font-size: 10px; font-weight: 800; color: var(--ff-green-dark); opacity: 0.6; text-transform: uppercase; letter-spacing: 2px; margin-top: 16px; }
+          .ff-loader-ring { width: 40px; height: 40px; border: 3px solid #f1f5f9; border-top-color: #10b981; border-radius: 50%; animation: spin 1s linear infinite; }
+          .ff-sync-text { font-size: 11px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin-top: 16px; }
           @keyframes spin { to { transform: rotate(360deg); } }
-        `}</style>
+          
+          @media (max-width: 1024px) {
+            .ff-hero-metrics { grid-template-columns: 1fr; }
+            .ff-main-grid { grid-template-columns: 1fr; }
+            .ff-top-bar { flex-direction: column; align-items: flex-start; gap: 15px;}
+            .ff-alert-hubs { width: 100%; justify-content: space-between; overflow-x: auto; padding-bottom: 5px;}
+          }
+
+          /* --- RESPONSIVE MOBILE & TABLET --- */
+          @media (max-width: 1024px) {
+            .ff-hero-metrics { grid-template-columns: 1fr; }
+            .ff-main-grid { grid-template-columns: 1fr; }
+            .ff-top-bar { flex-direction: column; align-items: flex-start; gap: 15px;}
+            .ff-alert-hubs { width: 100%; justify-content: space-between; overflow-x: auto; padding-bottom: 5px;}
+          }
+          
+          @media (max-width: 768px) {
+            .ff-container { padding: 15px; }
+            .ff-client-badge { width: 100%; justify-content: space-between; }
+            .c-tags { display: none; /* Ocultamos tags en mobile para limpiar vista */ }
+            .ff-alert-hubs { flex-direction: column; align-items: stretch; width: 100%; }
+            .btn-create, .alert-pill { justify-content: center; width: 100%; }
+            
+            /* Tablas a Tarjetas en Mobile */
+            .ff-list-row { flex-wrap: wrap; gap: 10px; padding: 15px; }
+            .col-code { width: 100%; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px; justify-content: space-between; }
+            .col-dest { width: 100%; font-size: 12px; margin-top: 5px; }
+            .col-amount, .col-status { flex: 1; align-items: flex-start; text-align: left; }
+            .col-stepper-mini { min-width: 100%; margin-top: 10px; align-items: flex-start; }
+            .row-arrow { display: none; }
+          }
+            
+        `}} />
       </div>
     </ClientLayout>
   );

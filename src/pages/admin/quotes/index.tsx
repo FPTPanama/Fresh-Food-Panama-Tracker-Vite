@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom"; 
 import { 
   PlusCircle, Search, Plane, Ship, 
   CheckCircle, SortAsc, AlertCircle, TrendingUp, ChevronRight, X,
-  Calendar, FileText, ArrowRight, ChevronLeft
+  Calendar, FileText, ArrowRight, ChevronLeft, MessageSquare, Archive
 } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
 import { getApiBase } from "../../../lib/apiBase";
@@ -50,6 +50,7 @@ const getStatusConfig = (status: string) => {
     case 'sent': return { label: 'ENVIADA', class: 'bg-sky-100 text-sky-700' };
     case 'approved': return { label: 'APROBADA', class: 'bg-emerald-100 text-emerald-700' };
     case 'rejected': return { label: 'RECHAZADA', class: 'bg-rose-100 text-rose-700' };
+    case 'archived': return { label: 'ARCHIVADA', class: 'bg-gray-200 text-gray-500' };
     default: return { label: s.toUpperCase(), class: 'bg-gray-100 text-gray-600' };
   }
 };
@@ -73,7 +74,6 @@ const QuoteSkeleton = () => (
   </div>
 );
 
-// --- HELPER TOOLTIP DE LOCACIÓN (Con colores de marca) ---
 const LocationTooltip = ({ code, locMap, children }: { code: string, locMap: Record<string, any>, children: React.ReactNode }) => {
   const locInfo = locMap[code?.toUpperCase()];
   const displayName = locInfo ? `${locInfo.name}${locInfo.country ? `, ${locInfo.country}` : ''}` : 'Locación Desconocida';
@@ -99,15 +99,14 @@ export default function AdminQuotesIndex() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [locationsMap, setLocationsMap] = useState<Record<string, any>>({});
   
-  // --- ESTADOS DE FILTRO Y PAGINACIÓN ---
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
+  const [sortField, setSortField] = useState("created_at");
   const [dir, setDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
-  const [totalItems, setTotalItems] = useState(0);
   const itemsPerPage = 12;
 
-  // --- ESTADO PARA MÉTRICAS GLOBALES ---
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
   const [globalStats, setGlobalStats] = useState({ pipeline: 0, countApproved: 0 });
 
   const loadGlobalStats = async () => {
@@ -121,7 +120,6 @@ export default function AdminQuotesIndex() {
     } catch (err) { console.error("Error loading stats", err); }
   };
 
-  // --- CARGA DE LOCACIONES ---
   useEffect(() => {
     async function fetchLocations() {
       const { data } = await supabase.from('master_locations').select('code, name, country');
@@ -143,11 +141,10 @@ export default function AdminQuotesIndex() {
       
       const p = new URLSearchParams();
       p.set("dir", dir);
-      p.set("sortField", "created_at");
-      p.set("page", page.toString());
-      p.set("pageSize", itemsPerPage.toString());
+      p.set("sortField", sortField);
       if (status) p.set("status", status);
-      if (q.trim()) p.set("q", q.trim());
+      p.set("page", "1");
+      p.set("pageSize", "1000"); 
       
       const url = `${getApiBase()}/.netlify/functions/listQuotes?${p.toString()}&t=${new Date().getTime()}`;
       const res = await fetch(url, { headers: { Authorization: `Bearer ${session.access_token}` } });
@@ -156,13 +153,12 @@ export default function AdminQuotesIndex() {
       const json = await res.json() as ApiResponse;
       
       setItems(json.items || []);
-      setTotalItems(json.total || 0);
     } catch (err: any) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
-  }, [dir, status, q, page, navigate]);
+  }, [dir, sortField, status, navigate]);
 
   useEffect(() => {
     requireAdminOrRedirect().then(r => {
@@ -173,8 +169,142 @@ export default function AdminQuotesIndex() {
     });
   }, [load]);
 
-  // Helpers de Paginación
-  const totalPages = Math.ceil(totalItems / itemsPerPage);
+  useEffect(() => {
+    async function fetchUnreadMessages() {
+      if (items.length === 0) return;
+      const quoteIds = items.map(i => i.id);
+      
+      try {
+        const { data } = await supabase
+          .from('quote_activity')
+          .select('quote_id')
+          .eq('is_read', false)
+          .eq('sender_role', 'client')
+          .in('quote_id', quoteIds);
+          
+        if (data) {
+          const counts: Record<string, number> = {};
+          data.forEach(msg => {
+            counts[msg.quote_id] = (counts[msg.quote_id] || 0) + 1;
+          });
+          setUnreadCounts(counts);
+        }
+      } catch (err) { console.error("Error al buscar mensajes:", err); }
+    }
+    fetchUnreadMessages();
+  }, [items]);
+
+  const handleArchive = async (e: React.MouseEvent, id: string, currentStatus: string) => {
+    e.stopPropagation(); 
+    if (currentStatus === 'archived') {
+      alert("Esta cotización ya está archivada.");
+      return;
+    }
+    const confirm = window.confirm("¿Estás seguro de archivar esta cotización? Esto la ocultará del cliente y cancelará cualquier embarque asociado.");
+    if (!confirm) return;
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("No hay sesión de usuario activa.");
+
+      const { data: fullQuote, error: fetchErr } = await supabase
+        .from('quotes')
+        .select('*')
+        .eq('id', id)
+        .single();
+        
+      if (fetchErr) throw fetchErr;
+
+      const payload = {
+        id: id,
+        total: fullQuote.total || fullQuote.total_amount,
+        status: 'archived',
+        mode: fullQuote.mode,
+        origin: fullQuote.origin,
+        destination: fullQuote.destination,
+        boxes: fullQuote.boxes,
+        weight_kg: fullQuote.weight_kg,
+        terms: fullQuote.terms,
+        payment_terms: fullQuote.payment_terms,
+        valid_until: fullQuote.valid_until,
+        costs: fullQuote.costs,
+        totals: fullQuote.totals,
+        product_id: fullQuote.product_id,
+        product_details: fullQuote.product_details
+      };
+
+      const res = await fetch(`${getApiBase()}/.netlify/functions/updateQuote`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json', 
+          'Authorization': `Bearer ${session.access_token}` 
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) throw new Error("Fallo en el servidor al intentar archivar.");
+
+      await supabase
+        .from('shipments')
+        .update({ status: 'CANCELLED' })
+        .eq('quote_id', id);
+
+      load(); 
+      loadGlobalStats();
+      
+    } catch (err: any) {
+      alert("Error al archivar: " + err.message);
+    }
+  };
+
+  // 🚨 LÓGICA DE BÚSQUEDA, ORDENAMIENTO Y OCULTAMIENTO EN EL FRONTEND
+  const filteredItems = useMemo(() => {
+    let result = [...items];
+
+    // 1. REGLA MAESTRA: Ocultar archivadas de la vista general.
+    // Solo se muestran si el usuario hace clic explícitamente en el filtro "Archivada"
+    if (status !== 'archived') {
+      result = result.filter(r => r.status?.toLowerCase() !== 'archived');
+    }
+
+    // 2. Filtrar por búsqueda
+    if (q.trim()) {
+      const lowerQ = q.toLowerCase();
+      result = result.filter(r => {
+        const code = (r.quote_number || r.quote_no || "").toLowerCase();
+        const client = (r.client_name || r.client_snapshot?.name || "").toLowerCase();
+        const origin = (r.origin || "").toLowerCase();
+        const dest = (r.destination || "").toLowerCase();
+        return code.includes(lowerQ) || client.includes(lowerQ) || origin.includes(lowerQ) || dest.includes(lowerQ);
+      });
+    }
+
+    // 3. Ordenar
+    result.sort((a, b) => {
+      let valA: any = a[sortField as keyof QuoteRow] || '';
+      let valB: any = b[sortField as keyof QuoteRow] || '';
+
+      if (sortField === 'created_at') {
+        valA = new Date(a.created_at).getTime();
+        valB = new Date(b.created_at).getTime();
+      }
+
+      if (valA < valB) return dir === 'asc' ? -1 : 1;
+      if (valA > valB) return dir === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    return result;
+  }, [items, q, sortField, dir, status]);
+
+  const totalFiltered = filteredItems.length;
+  const totalPages = Math.ceil(totalFiltered / itemsPerPage) || 1;
+  
+  const paginatedItems = useMemo(() => {
+    const startIndex = (page - 1) * itemsPerPage;
+    return filteredItems.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredItems, page, itemsPerPage]);
+
   const handlePrevPage = () => setPage(p => Math.max(1, p - 1));
   const handleNextPage = () => setPage(p => Math.min(totalPages, p + 1));
 
@@ -225,15 +355,25 @@ export default function AdminQuotesIndex() {
             <div className="ff-input-wrapper flex-grow">
               <Search size={16} />
               <input 
-                placeholder="Buscar cliente, destino o número..." 
+                placeholder="Buscar cliente, destino o código..." 
                 value={q} 
                 onChange={e => { setQ(e.target.value); setPage(1); }} 
               />
               {q && <X size={14} className="clear-icon" onClick={() => { setQ(""); setPage(1); }} />}
             </div>
             
+            <select 
+              className="ff-sort-select"
+              value={sortField}
+              onChange={(e) => { setSortField(e.target.value); setPage(1); }}
+            >
+              <option value="created_at">Por Fecha</option>
+              <option value="quote_number">Por Número</option>
+              <option value="destination">Por Destino</option>
+            </select>
+            
             <div className="ff-filters-pills">
-              {['Solicitud', 'draft', 'sent', 'approved'].map(s => {
+              {['Solicitud', 'draft', 'sent', 'approved', 'archived'].map(s => {
                 const conf = getStatusConfig(s);
                 return (
                   <button 
@@ -249,7 +389,7 @@ export default function AdminQuotesIndex() {
           </div>
           
           <button className="ff-btn-secondary" onClick={() => { setDir(dir === 'asc' ? 'desc' : 'asc'); setPage(1); }}>
-            <SortAsc size={14} /> {dir === 'desc' ? 'Más Recientes' : 'Más Antiguas'}
+            <SortAsc size={14} /> {dir === 'desc' ? 'Más Recientes' : 'Más Antiguos'}
           </button>
         </div>
 
@@ -264,17 +404,20 @@ export default function AdminQuotesIndex() {
           </div>
 
           <div className="ff-list-body">
-            {loading ? ( <><QuoteSkeleton /><QuoteSkeleton /><QuoteSkeleton /></> ) : items.length === 0 ? (
+            {loading ? ( <><QuoteSkeleton /><QuoteSkeleton /><QuoteSkeleton /></> ) : paginatedItems.length === 0 ? (
               <div className="ff-empty-state">
                 <FileText size={32} />
-                <p>No se encontraron cotizaciones para estos filtros.</p>
+                <p>No se encontraron cotizaciones activas.</p>
               </div>
             ) : (
-              items.map((r) => {
+              paginatedItems.map((r) => {
                 const isRequest = r.status === 'Solicitud';
+                const isArchived = r.status === 'archived';
                 const statusConf = getStatusConfig(r.status);
                 const displayId = r.quote_number || r.quote_no || `RFQ-${r.id.slice(0,5).toUpperCase()}`;
                 const shipmentDate = r.product_details?.requested_shipment_date;
+                
+                const hasUnread = unreadCounts[r.id] > 0;
 
                 let details = r.product_details;
                 if (typeof details === 'string') {
@@ -286,13 +429,21 @@ export default function AdminQuotesIndex() {
                 return (
                   <div 
                     key={r.id} 
-                    className={`ff-list-row ${isRequest ? 'urgent' : ''}`} 
+                    className={`ff-list-row ${isRequest ? 'urgent' : ''} ${isArchived ? 'archived-row' : ''}`} 
                     onClick={() => r.id && navigate(`/admin/quotes/${r.id}`)}
                   > 
                     <div className="col-code">
                       <TransportIcon mode={r.mode || 'SEA'} />
                       <div className="flex-col">
-                        <span className="code-text">{displayId}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span className="code-text">{displayId}</span>
+                          {hasUnread && (
+                            <div className="unread-bubble" title="Nuevo mensaje del cliente">
+                              <div className="pulse-dot"></div>
+                              <MessageSquare size={12} />
+                            </div>
+                          )}
+                        </div>
                         <div className="product-stack">
                           <span className="boxes-badge">{r.boxes || 0} CAJAS</span>
                           <span className="sub-text">{productInfo || 'S/D'}</span>
@@ -334,7 +485,17 @@ export default function AdminQuotesIndex() {
 
                     <div className="col-status">
                       <span className={`status-badge ${statusConf.class}`}>{statusConf.label}</span>
-                      <ChevronRight size={16} className="row-chevron" />
+                      
+                      <div className="row-actions">
+                        <button 
+                          className="archive-btn" 
+                          title={isArchived ? "Archivada" : "Archivar (Ocultar al cliente)"}
+                          onClick={(e) => handleArchive(e, r.id, r.status)}
+                        >
+                          <Archive size={14} />
+                        </button>
+                        <ChevronRight size={16} className="row-chevron" />
+                      </div>
                     </div>
                   </div>
                 );
@@ -344,9 +505,9 @@ export default function AdminQuotesIndex() {
         </div>
 
         {/* PAGINACIÓN ELEGANTE */}
-        {!loading && totalItems > 0 && (
+        {!loading && totalFiltered > 0 && (
           <div className="ff-pagination">
-            <span className="page-info">Mostrando {((page - 1) * itemsPerPage) + 1} - {Math.min(page * itemsPerPage, totalItems)} de {totalItems} cotizaciones</span>
+            <span className="page-info">Mostrando {((page - 1) * itemsPerPage) + 1} - {Math.min(page * itemsPerPage, totalFiltered)} de {totalFiltered} resultados</span>
             <div className="page-controls">
               <button onClick={handlePrevPage} disabled={page === 1}><ChevronLeft size={16} /></button>
               <span className="page-number">Página {page} de {totalPages}</span>
@@ -397,27 +558,34 @@ export default function AdminQuotesIndex() {
         .m-value { font-size: 28px; font-weight: 900; color: var(--ff-green-dark); letter-spacing: -0.5px; }
         .m-value small { font-size: 16px; opacity: 0.5; font-weight: 700; margin-right: 4px; }
 
-        /* TOOLBAR */
-        .ff-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
-        .ff-search-group { display: flex; gap: 16px; flex-grow: 1; align-items: center; }
+        /* TOOLBAR Y NUEVO SELECTOR DE ORDEN */
+        .ff-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 15px; flex-wrap: wrap; }
+        .ff-search-group { display: flex; gap: 12px; flex-grow: 1; align-items: center; flex-wrap: wrap; }
         
         .ff-input-wrapper { 
           position: relative; background: white; border: 1.5px solid rgba(34, 76, 34, 0.15); 
-          border-radius: 12px; height: 44px; display: flex; align-items: center; padding: 0 14px; 
-          color: var(--ff-green-dark); transition: 0.2s; max-width: 400px;
+          border-radius: 10px; height: 40px; display: flex; align-items: center; padding: 0 14px; 
+          color: var(--ff-green-dark); transition: 0.2s; min-width: 250px; flex: 1; max-width: 350px;
         }
         .ff-input-wrapper:focus-within { border-color: var(--ff-green); box-shadow: 0 0 0 3px rgba(34, 116, 50, 0.05); }
         .ff-input-wrapper input { 
           border: none; background: transparent; width: 100%; height: 100%; 
-          outline: none; font-size: 13px; font-weight: 600; color: var(--ff-green-dark); padding-left: 10px;
+          outline: none; font-size: 12px; font-weight: 600; color: var(--ff-green-dark); padding-left: 10px;
         }
         .clear-icon { cursor: pointer; opacity: 0.4; transition: 0.2s; }
         .clear-icon:hover { opacity: 1; color: #ef4444; }
 
-        .ff-filters-pills { display: flex; gap: 8px; }
+        .ff-sort-select {
+          height: 40px; border-radius: 10px; border: 1.5px solid rgba(34, 76, 34, 0.15);
+          padding: 0 12px; font-size: 12px; font-weight: 700; color: var(--ff-green-dark);
+          background: white; outline: none; cursor: pointer; transition: 0.2s;
+        }
+        .ff-sort-select:hover { border-color: var(--ff-green); }
+
+        .ff-filters-pills { display: flex; gap: 6px; flex-wrap: wrap; }
         .ff-pill { 
-          position: relative; padding: 0 16px; height: 36px; border-radius: 10px; 
-          border: 1.5px solid rgba(34,76,34,0.15); background: white; font-size: 11px; 
+          position: relative; padding: 0 12px; height: 32px; border-radius: 8px; 
+          border: 1px solid rgba(34,76,34,0.15); background: white; font-size: 10.5px; 
           font-weight: 700; color: var(--ff-green-dark); cursor: pointer; transition: 0.2s; 
         }
         .ff-pill:hover { border-color: var(--ff-green); background: #f9fbf9; }
@@ -425,18 +593,18 @@ export default function AdminQuotesIndex() {
         .ff-pill.has-pulse::after { content: ''; position: absolute; top: -3px; right: -3px; width: 10px; height: 10px; background: var(--ff-orange); border-radius: 50%; border: 2px solid white; }
 
         .ff-btn-secondary { 
-          background: white; border: 1.5px solid rgba(34, 76, 34, 0.15); padding: 0 16px; height: 44px;
-          border-radius: 12px; font-weight: 700; font-size: 12px; display: flex; align-items: center; gap: 8px; 
-          cursor: pointer; color: var(--ff-green-dark); transition: 0.2s; 
+          background: white; border: 1.5px solid rgba(34, 76, 34, 0.15); padding: 0 16px; height: 40px;
+          border-radius: 10px; font-weight: 700; font-size: 12px; display: flex; align-items: center; gap: 8px; 
+          cursor: pointer; color: var(--ff-green-dark); transition: 0.2s; flex-shrink: 0;
         }
         .ff-btn-secondary:hover { background: #f9fbf9; border-color: var(--ff-green); }
 
         /* LISTADO DE COTIZACIONES */
-        .ff-list-container { background: white; border-radius: 20px; border: 1px solid rgba(34,76,34,0.08); box-shadow: 0 2px 10px rgba(0,0,0,0.02); overflow: hidden; }
+        .ff-list-container { background: white; border-radius: 20px; border: 1px solid rgba(34,76,34,0.08); box-shadow: 0 2px 10px rgba(0,0,0,0.02); overflow: hidden; margin-top: 5px; }
         
         .ff-list-header { 
           display: grid;
-          grid-template-columns: 240px 1.5fr 1fr 140px 140px;
+          grid-template-columns: 260px 1.5fr 1fr 140px 160px;
           gap: 20px;
           align-items: center; padding: 16px 24px; border-bottom: 1px solid rgba(34,76,34,0.08);
           background: #f9fbf9; 
@@ -446,32 +614,45 @@ export default function AdminQuotesIndex() {
           font-size: 10px; font-weight: 800; color: var(--ff-green-dark); opacity: 0.6; text-transform: uppercase; letter-spacing: 0.5px;
         }
         .ff-list-header .col-amount { text-align: right; }
-        .ff-list-header .col-status { display: flex; justify-content: flex-end; padding-right: 28px; }
+        .ff-list-header .col-status { display: flex; justify-content: flex-end; padding-right: 32px; }
         
         .ff-list-body { display: flex; flex-direction: column; }
         .ff-list-row { 
           display: grid;
-          grid-template-columns: 240px 1.5fr 1fr 140px 140px;
+          grid-template-columns: 260px 1.5fr 1fr 140px 160px;
           gap: 20px;
           align-items: center; padding: 14px 24px; 
           border-bottom: 1px solid rgba(34,76,34,0.04); cursor: pointer; transition: all 0.2s ease; background: white;
         }
         .ff-list-row:last-child { border-bottom: none; }
-        .ff-list-row:hover { background: #fcfdfc; transform: translateY(-1px); box-shadow: 0 4px 10px rgba(34,76,34,0.03); border-color: var(--ff-green); }
+        .ff-list-row:hover { background: #fcfdfc; transform: translateY(-1px); box-shadow: 0 4px 10px rgba(34,76,34,0.03); border-color: var(--ff-green); z-index: 10; position: relative; }
         
+        /* ESTADOS ESPECIALES DE FILA */
         .ff-list-row.urgent { background: #fff5f5; border-bottom: 1px solid #fecdd3; }
         .ff-list-row.urgent:hover { border-color: #ef4444; }
+        .ff-list-row.archived-row { opacity: 0.5; filter: grayscale(100%); background: #f8fafc; }
+        .ff-list-row.archived-row:hover { opacity: 0.8; filter: none; }
 
         /* ESTRUCTURA INTERNA DE COLUMNAS */
         .col-code { display: flex; align-items: center; gap: 12px; }
         .col-client { font-size: 13px; font-weight: 600; color: var(--ff-green-dark); opacity: 0.9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px; }
         .col-route { display: flex; flex-direction: column; justify-content: center; gap: 4px; }
         .col-amount { text-align: right; }
-        .col-status { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+        .col-status { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
 
         .flex-col { display: flex; flex-direction: column; gap: 4px; }
         .code-text { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 800; letter-spacing: -0.2px; color: var(--ff-green-dark); line-height: 1; }
         
+        /* BURBUJA DE MENSAJE NO LEÍDO */
+        .unread-bubble { 
+          display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; 
+          background: #fee2e2; color: #ef4444; border-radius: 6px; position: relative; 
+        }
+        .unread-bubble .pulse-dot { 
+          position: absolute; top: -3px; right: -3px; width: 8px; height: 8px; 
+          background: #ef4444; border-radius: 50%; border: 1.5px solid white; animation: pulse-orange 1.5s infinite; 
+        }
+
         .product-stack { display: flex; align-items: center; gap: 8px; }
         .boxes-badge { font-size: 9px; font-weight: 800; background: rgba(34,76,34,0.06); color: var(--ff-green-dark); padding: 2px 6px; border-radius: 4px; line-height: 1.2; }
         .urgent .boxes-badge { background: #fee2e2; color: #ef4444; }
@@ -497,9 +678,9 @@ export default function AdminQuotesIndex() {
         .row-icon-box.air { background: #e0f2fe; color: #0284c7; } 
         .row-icon-box.sea { background: #f1f5f9; color: #475569; }
 
-        /* STATUS BADGES */
+        /* STATUS BADGES Y ACCIONES */
         .status-badge { 
-          font-size: 9px; font-weight: 800; padding: 6px 0; border-radius: 8px; letter-spacing: 0.5px; 
+          font-size: 9px; font-weight: 800; padding: 6px 0; border-radius: 6px; letter-spacing: 0.5px; 
           width: 90px; text-align: center; display: inline-block; box-sizing: border-box;
         }
         .bg-slate-100 { background: #f1f5f9; color: #475569; } 
@@ -510,7 +691,18 @@ export default function AdminQuotesIndex() {
         .bg-sky-100 { background: #e0f2fe; color: #0369a1; } 
         .bg-orange-100 { background: #fff7ed; color: #ea580c; }
         .bg-rose-100 { background: #ffe4e6; color: #be123c; } 
+        .bg-gray-200 { background: #e2e8f0; color: #64748b; }
         
+        .row-actions { display: flex; align-items: center; gap: 8px; margin-left: 5px; }
+        
+        .archive-btn { 
+          background: transparent; border: none; color: #94a3b8; cursor: pointer; padding: 4px; 
+          border-radius: 6px; transition: 0.2s; display: flex; align-items: center; justify-content: center;
+        }
+        .archive-btn:hover { background: #fee2e2; color: #ef4444; }
+        .archived-row .archive-btn { color: #cbd5e1; cursor: not-allowed; }
+        .archived-row .archive-btn:hover { background: transparent; color: #cbd5e1; }
+
         .row-chevron { color: var(--ff-green-dark); opacity: 0.2; transition: 0.2s; }
         .ff-list-row:hover .row-chevron { opacity: 1; transform: translateX(3px); }
 
@@ -523,7 +715,7 @@ export default function AdminQuotesIndex() {
         .page-controls button:hover:not(:disabled) { border-color: var(--ff-green); background: #f9fbf9; }
         .page-number { font-size: 12px; font-weight: 700; color: var(--ff-green-dark); }
 
-        /* TOOLTIPS (NUEVOS COLORES DE MARCA) */
+        /* TOOLTIPS */
         .ff-tooltip-wrapper { position: relative; display: inline-flex; align-items: center; }
         .ff-tooltip-content {
           position: absolute; bottom: 120%; left: 50%; transform: translateX(-50%) translateY(10px);
@@ -551,7 +743,7 @@ export default function AdminQuotesIndex() {
         .ff-empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; color: var(--ff-green-dark); opacity: 0.5; gap: 12px; }
         .ff-empty-state p { margin: 0; font-size: 13px; font-weight: 600; }
 
-        @keyframes pulse-orange { 0% { box-shadow: 0 0 0 0 rgba(209, 119, 17, 0.7); } 100% { box-shadow: 0 0 0 6px rgba(209, 119, 17, 0); } }
+        @keyframes pulse-orange { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); } 100% { box-shadow: 0 0 0 5px rgba(239, 68, 68, 0); } }
       `}</style>
     </AdminLayout>
   );

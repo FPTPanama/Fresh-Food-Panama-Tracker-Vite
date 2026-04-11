@@ -585,6 +585,48 @@ export default function ClientShipmentDetail() {
         /* LOADER Y TEXTOS SYNC */
         .loader-full { height: calc(100vh - 80px); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
         .ff-sync-text { font-size: 11px; font-weight: 800; color: var(--ff-green-dark); opacity: 0.6; text-transform: uppercase; letter-spacing: 2px; margin: 0;}
+
+        /* --- RESPONSIVE MOBILE & TABLET --- */
+        @media (max-width: 1024px) {
+          /* Convertir el layout dividido (Sidebar + Content) en una sola columna */
+          .clean-layout { grid-template-columns: 1fr; gap: 20px; }
+          
+          /* El sidebar ahora es un menú de pestañas horizontal superior */
+          .side-nav { flex-direction: row; position: static; overflow-x: auto; padding-bottom: 5px; white-space: nowrap; }
+          .nav-item { flex: 1; justify-content: center; text-align: center; border-radius: 8px; padding: 10px; }
+          
+          /* Los 3 bloques de datos del Resumen Operativo se apilan */
+          .compact-data-grid { grid-template-columns: 1fr; padding: 0; }
+          .data-block { border-right: none; border-bottom: 1px solid rgba(34, 76, 34, 0.08); padding: 20px; }
+          .data-block.no-border { border-bottom: none; }
+        }
+
+        @media (max-width: 768px) {
+          .clean-container { padding: 15px; }
+          
+          /* Header: Apilar título y estadísticas */
+          .clean-header { flex-direction: column; align-items: flex-start; gap: 20px; }
+          .ch-right { width: 100%; border-top: 1px solid rgba(34, 76, 34, 0.05); padding-top: 15px; }
+          .ch-stats { width: 100%; justify-content: space-between; }
+          .stat-block { align-items: flex-start; }
+          
+          /* Stepper: Achicar para que quepa en móvil */
+          .saas-stepper-wrapper { padding: 30px 10px 20px 10px; }
+          .saas-stepper-track-bg, .saas-stepper-track-fill { left: 20px; right: 20px; top: 48px; }
+          .saas-node { width: 60px; }
+          .node-circle { width: 28px; height: 28px; }
+          .n-title { font-size: 9px; }
+          .n-pill { display: none; /* Ocultar píldoras extra en móvil para ahorrar espacio */ }
+          
+          /* Tabla de documentos modo móvil */
+          .clean-table th, .clean-table td { padding: 12px 10px; font-size: 11px; }
+          .doc-name-pill { padding: 4px 6px; font-size: 9px; word-break: break-all; }
+          
+          /* Fotos */
+          .photos-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 15px; }
+          .pad-32 { padding: 15px; }
+        }
+          
       ` }} />
     </ClientLayout>
   );

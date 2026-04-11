@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom"; 
 import { 
   Save, FileText, Loader2, Plane, Ship, 
-  Thermometer, Droplets, Calculator, MapPin, Shield, ArrowRight, Package,
+  Thermometer, Droplets, Calculator, MapPin, Shield, ArrowRight,
   Maximize, AlertCircle, TrendingDown, ChevronLeft, ChevronRight,
-  Calendar, MessageSquare, Clock
+  Calendar, MessageSquare, Clock, CreditCard, CalendarClock
 } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
 import { getApiBase } from "../../../lib/apiBase";
@@ -18,33 +18,16 @@ const LOGS_PER_PAGE = 5;
 
 // FIX: Diccionario expandido con TODOS los campos posibles de la cotización
 const FIELD_LABELS: { [key: string]: string } = {
-  boxes: "Cajas",
-  weight_kg: "Peso (Kg)",
-  origin: "Origen",
-  destination: "Destino",
-  status: "Estado",
-  total: "Venta Total",
-  mode: "Vía de Transporte",
-  terms: "Términos y Condiciones",
-  product_id: "ID Producto",
-  product_details: "Especificaciones",
-  pallets: "Pallets",
-  incoterm: "Incoterm",
-  variety: "Variedad",
-  color: "Color",
-  brix: "Brix",
-  caliber: "Calibre",
-  requested_shipment_date: "ETD (Salida)",
-  c_fruit: "Costo Fruta", s_fruit: "Venta Fruta",
-  c_freight: "Costo Flete", s_freight: "Venta Flete",
-  c_origin: "Costo Origen", s_origin: "Venta Origen",
-  c_aduana: "Costo Aduana", s_aduana: "Venta Aduana",
-  c_insp: "Costo Inspección", s_insp: "Venta Inspección",
-  c_itbms: "Costo ITBMS", s_itbms: "Venta ITBMS",
-  c_handling: "Costo Handling", s_handling: "Venta Handling",
-  c_other: "Otros Costos", s_other: "Otras Ventas",
-  costs: "Costos/Precios",
-  totals: "Totales"
+  boxes: "Cajas", weight_kg: "Peso (Kg)", origin: "Origen", destination: "Destino",
+  status: "Estado", total: "Venta Total", mode: "Vía de Transporte", terms: "Términos y Condiciones",
+  payment_terms: "Condiciones de Pago", valid_until: "Válido Hasta", product_id: "ID Producto",
+  product_details: "Especificaciones", pallets: "Pallets", incoterm: "Incoterm",
+  variety: "Variedad", color: "Color", brix: "Brix", caliber: "Calibre",
+  requested_shipment_date: "ETD (Salida)", c_fruit: "Costo Fruta", s_fruit: "Venta Fruta",
+  c_freight: "Costo Flete", s_freight: "Venta Flete", c_origin: "Costo Origen", s_origin: "Venta Origen",
+  c_aduana: "Costo Aduana", s_aduana: "Venta Aduana", c_insp: "Costo Inspección", s_insp: "Venta Inspección",
+  c_itbms: "Costo ITBMS", s_itbms: "Venta ITBMS", c_handling: "Costo Handling", s_handling: "Venta Handling",
+  c_other: "Otros Costos", s_other: "Otras Ventas", costs: "Costos/Precios", totals: "Totales"
 };
 
 // Función robusta para formatear valores en el historial
@@ -65,14 +48,12 @@ const statusBadgeClass = (status: string | undefined) => {
     case 'approved': return base + "green";
     case 'rejected': return base + "red";
     case 'expired': return base + "orange";
+    case 'archived': return base + "gray"; // Añadido soporte visual para archivado
     default: return base + "gray";
   }
 };
 
-const DEFAULT_TERMS = `• Validez de la oferta: 5 días hábiles.
-• Precios basados en el Incoterm seleccionado.
-• Sujeto a disponibilidad de espacio en aerolínea/naviera.
-• Incluye inspección fitosanitaria y pre-enfriamiento.`;
+const DEFAULT_TERMS = `• Validez de la oferta: 5 días hábiles.\n• Precios basados en el Incoterm seleccionado.\n• Sujeto a disponibilidad de espacio en aerolínea/naviera.\n• Incluye inspección fitosanitaria y pre-enfriamiento.`;
 
 interface CostLine { base: number; unitSale: number; label: string; tip: string; }
 interface CostState { [key: string]: CostLine; }
@@ -129,6 +110,10 @@ export default function AdminQuoteDetailPage() {
   const [caliber, setCaliber] = useState(""); 
   const [shipmentDate, setShipmentDate] = useState(""); 
   const [termsConditions, setTermsConditions] = useState(DEFAULT_TERMS);
+
+  // NUEVOS ESTADOS DE NEGOCIO
+  const [paymentTerms, setPaymentTerms] = useState("A convenir entre las partes");
+  const [validUntil, setValidUntil] = useState("");
 
   const isReadOnly = useMemo(() => status?.toLowerCase() === 'approved', [status]);
 
@@ -242,6 +227,11 @@ export default function AdminQuoteDetailPage() {
         setPlace(q.destination || "");
         setProductId(q.product_id || "");
         setTermsConditions(q.terms || DEFAULT_TERMS);
+        
+        // Cargar nuevos valores comerciales
+        setPaymentTerms(q.payment_terms || "A convenir entre las partes");
+        setValidUntil(q.valid_until || ""); 
+
         const det = q.product_details || {};
         setVariety(det.variety || "");
         setColor(det.color || "");
@@ -256,14 +246,14 @@ export default function AdminQuoteDetailPage() {
 
         const c = q.costs || {};
         setCosts({
-          fruta: { base: Number(c.c_fruit || 13.30), unitSale: Number(c.s_fruit || 0), label: "Fruta (Base Cajas)", tip: "Precio de compra." },
-          flete: { base: Number(c.c_freight || 0), unitSale: Number(c.s_freight || 0), label: "Flete Internacional", tip: "Costo por Kg." },
-          origen: { base: Number(c.c_origin || 0), unitSale: Number(c.s_origin || 0), label: "Gastos de Origen", tip: "Manejo local." },
-          aduana: { base: Number(c.c_aduana || 0), unitSale: Number(c.s_aduana || 0), label: "Gestión Aduanera", tip: "Corredor." },
-          inspeccion: { base: Number(c.c_insp || 0), unitSale: Number(c.s_insp || 0), label: "Inspecciones / Fiton", tip: "MIDA." },
-          itbms: { base: Number(c.c_itbms || 0), unitSale: Number(c.s_itbms || 0), label: "ITBMS / Tasas", tip: "Impuestos." },
-          handling: { base: Number(c.c_handling || 0), unitSale: Number(c.s_handling || 0), label: "Handling", tip: "Manejo carga." },
-          otros: { base: Number(c.c_other || 0), unitSale: Number(c.s_other || 0), label: "Otros Gastos", tip: "Extras." }
+          fruta: { base: Number(c.c_fruit || 13.30), unitSale: Number(c.s_fruit || 0), label: "Fruta (Base Cajas)", tip: "Precio de compra por caja." },
+          flete: { base: Number(c.c_freight || 0), unitSale: Number(c.s_freight || 0), label: "Flete Internacional", tip: "Costo por Kg estimado." },
+          origen: { base: Number(c.c_origin || 0), unitSale: Number(c.s_origin || 0), label: "Gastos de Origen", tip: "Transporte interno y manejo." },
+          aduana: { base: Number(c.c_aduana || 0), unitSale: Number(c.s_aduana || 0), label: "Gestión Aduanera", tip: "Corredor y trámites." },
+          inspeccion: { base: Number(c.c_insp || 0), unitSale: Number(c.s_insp || 0), label: "Inspecciones / Fiton", tip: "Costo fijo MIDA." },
+          itbms: { base: Number(c.c_itbms || 0), unitSale: Number(c.s_itbms || 0), label: "ITBMS / Tasas", tip: "Impuestos aplicables." },
+          handling: { base: Number(c.c_handling || 0), unitSale: Number(c.s_handling || 0), label: "Handling", tip: "Manejo de carga." },
+          otros: { base: Number(c.c_other || 0), unitSale: Number(c.s_other || 0), label: "Otros Gastos", tip: "Gastos no previstos." }
         });
 
         const m = q.totals?.meta || {};
@@ -285,6 +275,14 @@ export default function AdminQuoteDetailPage() {
   useEffect(() => {
     if (authOk && id) loadData();
   }, [authOk, id, loadData]);
+
+  // Función de autocompletado +5 Días
+  const handleSet5Days = () => {
+    if (isReadOnly) return;
+    const baseDate = data?.created_at ? new Date(data.created_at) : new Date();
+    baseDate.setDate(baseDate.getDate() + 5);
+    setValidUntil(baseDate.toISOString().split('T')[0]);
+  };
 
   const updateCostLine = (key: string, field: 'base' | 'unitSale', value: string) => {
     if (isReadOnly) return;
@@ -341,6 +339,8 @@ export default function AdminQuoteDetailPage() {
         boxes: Number(boxes), 
         weight_kg: Number(weightKg),
         terms: termsConditions,
+        payment_terms: paymentTerms, // Se guardan términos de pago
+        valid_until: validUntil || null, // Se guarda validez
         costs: {
           c_fruit: Number(costs.fruta.base), s_fruit: Number(costs.fruta.unitSale),
           c_freight: Number(costs.flete.base), s_freight: Number(costs.flete.unitSale),
@@ -487,7 +487,31 @@ export default function AdminQuoteDetailPage() {
               <option value="sent">Enviada</option>
               <option value="approved">Aprobada</option>
               <option value="rejected">Rechazada</option>
+              <option value="archived">Archivada</option>
             </select>
+          </div>
+        </div>
+
+        {/* --- CONDICIONES COMERCIALES (NUEVO) --- */}
+        <div className="ff-card strip border-blue">
+          <div className="strip-label" style={{ color: '#1d4ed8' }}>COMERCIAL</div>
+          <div className="strip-grid">
+            <div className="f" style={{flex: 2}}>
+              <label><CreditCard size={10}/> Condiciones de Pago</label>
+              <select disabled={isReadOnly} value={paymentTerms} onChange={e => setPaymentTerms(e.target.value)} style={{ backgroundColor: '#eff6ff', borderColor: '#bfdbfe', fontWeight: 'bold', color: '#1e40af' }}>
+                <option value="Prepagado">Prepagado</option>
+                <option value="50% anticipo 50% contra documentos de embarque">50% anticipo 50% contra docs.</option>
+                <option value="7 dias después de recepción">7 dias después de recepción</option>
+                <option value="A convenir entre las partes">A convenir entre las partes</option>
+              </select>
+            </div>
+            <div className="f" style={{flex: 1}}>
+              <label><CalendarClock size={10}/> Vencimiento Oferta</label>
+              <div style={{ display: 'flex', gap: '5px' }}>
+                <input disabled={isReadOnly} type="date" value={validUntil} onChange={e => setValidUntil(e.target.value)} style={{ flex: 1 }} />
+                <button onClick={handleSet5Days} disabled={isReadOnly} title="Fijar a 5 días desde la creación" style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '0 8px', fontSize: '11px', fontWeight: 'bold', color: '#475569', cursor: isReadOnly ? 'not-allowed' : 'pointer' }}>+5D</button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -504,10 +528,10 @@ export default function AdminQuoteDetailPage() {
         </div>
 
         {/* --- LOGÍSTICA --- */}
-        <div className="ff-card strip blue">
-          <div className="strip-label">LOGÍSTICA</div>
+        <div className="ff-card strip">
+          <div className="strip-label" style={{ color: '#0f766e' }}>LOGÍSTICA</div>
           <div className="strip-grid">
-            <div className="f" style={{ flex: "0 0 85px" }}>
+            <div className="f" style={{ flex: "0 0 80px" }}>
               <label>Modo</label>
               <div className={`toggle ${isReadOnly ? 'readonly' : ''}`}>
                 <button className={mode === 'AIR' ? 'active' : ''} onClick={() => !isReadOnly && setMode('AIR')}><Plane size={14} /></button>
@@ -515,14 +539,14 @@ export default function AdminQuoteDetailPage() {
               </div>
             </div>
 
-            <div className="f" style={{ flex: "0 0 90px" }}>
+            <div className="f" style={{ flex: "0 0 85px" }}>
               <label>Incoterm</label>
               <select disabled={isReadOnly} value={incoterm} onChange={e => setIncoterm(e.target.value)}>
                 <option value="EXW">EXW</option><option value="FOB">FOB</option><option value="CIP">CIP</option><option value="CIF">CIF</option><option value="DDP">DDP</option><option value="FCA">FCA</option>
               </select>
             </div>
 
-            <div className="f" style={{ flex: "1", minWidth: "120px" }}>
+            <div className="f" style={{ flex: "1", minWidth: "110px" }}>
               <label>Origen</label>
               {isReadOnly 
                 ? <LocationTooltip code={origin} locMap={locationsMap}><input disabled value={origin} className="tooltip-trigger-input" /></LocationTooltip> 
@@ -530,7 +554,7 @@ export default function AdminQuoteDetailPage() {
               }
             </div>
 
-            <div className="f" style={{ flex: "1", minWidth: "120px" }}>
+            <div className="f" style={{ flex: "1", minWidth: "110px" }}>
               <label>Destino</label>
               {isReadOnly 
                 ? <LocationTooltip code={place} locMap={locationsMap}><input disabled value={place} className="tooltip-trigger-input" /></LocationTooltip> 
@@ -538,30 +562,21 @@ export default function AdminQuoteDetailPage() {
               }
             </div>
             
-            <div className="f" style={{ flex: "0 0 120px" }} title="Fecha estimada de embarque (Estimated Time of Departure)">
+            <div className="f" style={{ flex: "0 0 110px" }} title="Fecha estimada de embarque (Estimated Time of Departure)">
               <label className="ff-help-cursor"><Calendar size={10} /> ETD</label>
-              <input 
-                disabled={isReadOnly}
-                type="date" 
-                value={shipmentDate} 
-                onChange={e => setShipmentDate(e.target.value)} 
-                className="ff-input-compact no-spin"
-              />
+              <input disabled={isReadOnly} type="date" value={shipmentDate} onChange={e => setShipmentDate(e.target.value)} className="ff-input-compact no-spin" />
             </div>
 
-            <div className="f" style={{ flex: "0 0 70px" }}>
-              <label>Cajas</label>
-              <input disabled={isReadOnly} type="number" className="no-spin" value={boxes} onChange={e => setBoxes(Number(e.target.value))} />
+            <div className="f" style={{ flex: "0 0 65px" }}>
+              <label>Cajas</label><input disabled={isReadOnly} type="number" className="no-spin" value={boxes} onChange={e => setBoxes(Number(e.target.value))} />
             </div>
 
-            <div className="f" style={{ flex: "0 0 70px" }}>
-              <label>Pallets</label>
-              <input disabled={isReadOnly} type="number" className="no-spin" value={pallets} onChange={e => setPallets(Number(e.target.value))} />
+            <div className="f" style={{ flex: "0 0 65px" }}>
+              <label>Pallets</label><input disabled={isReadOnly} type="number" className="no-spin" value={pallets} onChange={e => setPallets(Number(e.target.value))} />
             </div>
 
-            <div className="f" style={{ flex: "0 0 80px" }}>
-              <label>Peso (Kg)</label>
-              <input disabled={isReadOnly} type="number" className="no-spin" value={weightKg} onChange={e => setWeightKg(Number(e.target.value))} />
+            <div className="f" style={{ flex: "0 0 75px" }}>
+              <label>Peso (Kg)</label><input disabled={isReadOnly} type="number" className="no-spin" value={weightKg} onChange={e => setWeightKg(Number(e.target.value))} />
             </div>
           </div>
         </div>
@@ -640,7 +655,7 @@ export default function AdminQuoteDetailPage() {
           </div>
         </div>
 
-        {/* --- HISTORIAL DE ACTIVIDAD (REDISEÑO PLANO ODOO) --- */}
+        {/* --- HISTORIAL DE ACTIVIDAD --- */}
         <div className="ff-card">
           <div className="table-h"><Clock size={18} color="#64748b"/> <span>Historial de Actividad</span></div>
           
@@ -679,7 +694,6 @@ export default function AdminQuoteDetailPage() {
             })}
           </div>
           
-          {/* CONTROLES DE PAGINACIÓN */}
           {logs.length > LOGS_PER_PAGE && (
             <div className="log-pagination">
               <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="pag-btn">
@@ -697,67 +711,55 @@ export default function AdminQuoteDetailPage() {
       </div>
 
       <style>{`
-        .ff-container { padding: 30px; max-width: 1250px; margin: 0 auto; font-family: 'Inter', sans-serif; }
-        .ff-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
-        .hero { display: flex; justify-content: space-between; align-items: center; background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+        /* COMPACTACIÓN GENERAL: Márgenes y paddings reducidos en todo el documento */
+        .ff-container { padding: 20px; max-width: 1250px; margin: 0 auto; font-family: 'Inter', sans-serif; }
+        .ff-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 15px 20px; margin-bottom: 15px; }
+        .hero { display: flex; justify-content: space-between; align-items: center; background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 15px 20px; margin-bottom: 15px; }
+        
         .heroLeft { display: flex; align-items: center; flex: 1; }
         .codeRow { display: flex; gap: 15px; align-items: center; }
-        .codeIcon { width: 44px; height: 44px; background: #f0fdf4; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+        .codeIcon { width: 40px; height: 40px; background: #f0fdf4; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
         .heroLabel { font-size: 10px; font-weight: 800; color: #94a3b8; text-transform: uppercase; }
-        .code { font-size: 22px; font-weight: 900; color: #1e293b; }
-        .productLine { font-size: 13px; color: #64748b; margin-top: 2px; }
+        .code { font-size: 20px; font-weight: 900; color: #1e293b; margin-top: -2px; }
+        .productLine { font-size: 12px; color: #64748b; margin-top: 1px; }
         .heroRight { display: flex; gap: 10px; align-items: center; }
-        .head-actions { display: flex; gap: 20px; align-items: center; margin-right: 15px; border-right: 1px solid #e2e8f0; padding-right: 20px; }
+        .head-actions { display: flex; gap: 15px; align-items: center; margin-right: 15px; border-right: 1px solid #e2e8f0; padding-right: 15px; }
+        
         .kpi-box { text-align: right; }
-        .kpi-val { display: block; font-size: 18px; font-weight: 900; color: #10b981; }
+        .kpi-val { display: block; font-size: 16px; font-weight: 900; color: #10b981; }
         .txt-danger { color: #ef4444 !important; }
         .kpi-lab { font-size: 9px; font-weight: 800; color: #94a3b8; }
-        .pdf-link { background: #f8fafc; color: #64748b; border: 1px solid #e2e8f0; padding: 10px 18px; border-radius: 8px; font-weight: 700; display: flex; gap: 8px; align-items: center; text-decoration: none; cursor: pointer; }
-        .btn-save { background: #10b981; color: white; border: none; padding: 10px 18px; border-radius: 8px; font-weight: 700; cursor: pointer; display: flex; gap: 8px; align-items: center; }
+        
+        .pdf-link { background: #f8fafc; color: #64748b; border: 1px solid #e2e8f0; padding: 8px 14px; border-radius: 8px; font-size: 12px; font-weight: 700; display: flex; gap: 6px; align-items: center; text-decoration: none; cursor: pointer; }
+        .btn-save { background: #10b981; color: white; border: none; padding: 8px 14px; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer; display: flex; gap: 6px; align-items: center; }
         .btn-danger { background: #ef4444 !important; }
-        .pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px; font-size: 11px; font-weight: 800; border: 1px solid transparent; }
+        
+        .pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 800; border: 1px solid transparent; }
         .pill.green { background: #f0fdf4; color: #166534; border-color: #bbf7d0; }
         .pill.blue { background: #eff6ff; color: #1e40af; border-color: #bfdbfe; }
         .pill.red { background: #fee2e2; color: #b91c1c; border-color: #fecaca; }
         .pill.gray { background: #f8fafc; color: #475569; border-color: #e2e8f0; }
         .pill.orange { background: #fff7ed; color: #c2410c; border-color: #ffedd5; }
         
-        .strip { display: flex; gap: 20px; align-items: center; padding: 12px 20px; }
-        .strip-label { width: 80px; font-size: 10px; font-weight: 900; color: #10b981; border-right: 1px solid #f1f5f9; }
+        /* STRIPS MÁS DELGADOS */
+        .strip { display: flex; gap: 15px; align-items: center; padding: 10px 15px; }
+        .strip-label { width: 75px; font-size: 10px; font-weight: 900; color: #10b981; border-right: 1px solid #f1f5f9; }
+        .border-blue { border-left: 4px solid #3b82f6; }
         
-        .strip-grid { 
-          display: flex; 
-          flex: 1; 
-          gap: 12px; 
-          flex-wrap: wrap; 
-          align-items: flex-end; 
-        }
-
-        .f { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 0; }
-        .f label { font-size: 10px; font-weight: 800; color: #94a3b8; text-transform: uppercase; display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+        .strip-grid { display: flex; flex: 1; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+        .f { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+        .f label { font-size: 9.5px; font-weight: 800; color: #94a3b8; text-transform: uppercase; display: flex; align-items: center; gap: 4px; white-space: nowrap; }
         
         .ff-help-cursor { cursor: help; text-decoration: underline dotted #94a3b8; }
 
-        .f input, .f select, .toggle { 
-          height: 38px; 
-          border: 1px solid #e2e8f0; 
-          border-radius: 6px; 
-          padding: 0 10px; 
-          font-size: 13px; 
-          font-weight: 600; 
-          outline: none; 
-          width: 100%;
-          background: white;
-        }
-        
+        /* INPUTS COMPACTOS (De 38px a 34px) */
+        .f input, .f select, .toggle { height: 34px; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0 8px; font-size: 12px; font-weight: 600; outline: none; width: 100%; background: white; }
         .tooltip-trigger-input { cursor: help !important; }
-
         .toggle.readonly { opacity: 0.7; cursor: not-allowed; pointer-events: none; }
+        .ff-input-compact { font-size: 11px !important; padding: 0 6px !important; }
 
-        .ff-input-compact { font-size: 12px !important; padding: 0 8px !important; }
-
-        .toggle { display: flex; background: #f1f5f9; padding: 2px; height: 38px; border-radius: 6px; width: auto; }
-        .toggle button { flex: 1; border: none; background: none; cursor: pointer; color: #94a3b8; display: flex; align-items: center; justify-content: center; padding: 0 10px; }
+        .toggle { display: flex; background: #f1f5f9; padding: 2px; height: 34px; border-radius: 6px; width: auto; }
+        .toggle button { flex: 1; border: none; background: none; cursor: pointer; color: #94a3b8; display: flex; align-items: center; justify-content: center; padding: 0 8px; }
         .toggle button.active { background: white; color: #3b82f6; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
         
         /* TOOLTIPS PARA COTIZACIONES */
@@ -777,28 +779,31 @@ export default function AdminQuoteDetailPage() {
         .loc-tooltip { display: flex; flex-direction: column; gap: 4px; align-items: center; }
         .loc-tooltip strong { font-size: 12px; font-weight: 800; color: #34d399; letter-spacing: 0.5px; }
 
-        .table-h { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; font-weight: 800; text-transform: uppercase; font-size: 12px; }
+        .table-h { display: flex; align-items: center; gap: 8px; margin-bottom: 15px; font-weight: 800; text-transform: uppercase; font-size: 11px; }
         .a-table { width: 100%; border-collapse: collapse; }
-        .a-table th { font-size: 10px; color: #94a3b8; padding: 10px; border-bottom: 2px solid #f8fafc; text-align: left; }
-        .a-table td { padding: 12px 10px; border-bottom: 1px solid #f8fafc; }
-        .c-box b { display: block; font-size: 13px; color: #1e293b; }
+        .a-table th { font-size: 10px; color: #94a3b8; padding: 8px; border-bottom: 2px solid #f8fafc; text-align: left; }
+        .a-table td { padding: 10px 8px; border-bottom: 1px solid #f8fafc; }
+        .c-box b { display: block; font-size: 12px; color: #1e293b; }
         .c-box span { font-size: 10px; color: #94a3b8; }
-        .in { width: 100px; padding: 8px; border: 1px solid #e2e8f0; border-radius: 6px; text-align: right; font-weight: 700; }
+        .in { width: 90px; padding: 6px; border: 1px solid #e2e8f0; border-radius: 6px; text-align: right; font-weight: 700; font-size: 12px; }
         .in.s { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
-        .m-badge { background: #f1f5f9; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 800; color: #475569; }
-        .a-footer { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-top: 25px; padding-top: 20px; border-top: 2px solid #f1f5f9; }
-        .stat { background: #f8fafc; padding: 15px; border-radius: 10px; font-size: 10px; color: #64748b; font-weight: 700; }
-        .stat b { display: block; font-size: 18px; color: #1e293b; margin-top: 5px; }
+        .m-badge { background: #f1f5f9; padding: 4px 8px; border-radius: 6px; font-size: 10px; font-weight: 800; color: #475569; }
+        
+        .a-footer { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 20px; padding-top: 15px; border-top: 2px solid #f1f5f9; }
+        .stat { background: #f8fafc; padding: 12px; border-radius: 10px; font-size: 10px; color: #64748b; font-weight: 700; }
+        .stat b { display: block; font-size: 16px; color: #1e293b; margin-top: 4px; }
         .stat b.g { color: #10b981; }
         .stat b.b { color: #3b82f6; }
         .stat.featured { background: #1e293b; color: #94a3b8; }
         .stat.featured b { color: white; }
         .stat-danger { background: #450a0a !important; border: 2px solid #ef4444; }
-        .stat-sub { font-size: 9px; margin-top: 4px; opacity: 0.8; display: block; }
-        .ff-alert-banner { background: #fee2e2; border: 1px solid #fecaca; padding: 12px 20px; border-radius: 12px; margin-bottom: 20px; display: flex; align-items: center; gap: 12px; color: #b91c1c; font-size: 13px; font-weight: 600; }
+        .stat-sub { font-size: 9px; margin-top: 2px; opacity: 0.8; display: block; }
+        
+        .ff-alert-banner { background: #fee2e2; border: 1px solid #fecaca; padding: 10px 15px; border-radius: 10px; margin-bottom: 15px; display: flex; align-items: center; gap: 10px; color: #b91c1c; font-size: 12px; font-weight: 600; }
         .toast { position: fixed; bottom: 30px; right: 30px; background: #1e293b; color: white; padding: 12px 25px; border-radius: 10px; z-index: 100; box-shadow: 0 10px 15px rgba(0,0,0,0.2); }
+        
         .spin { animation: spin 1s linear infinite; }
-        .terms-editor { width: 100%; min-height: 100px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; font-size: 13px; color: #475569; line-height: 1.5; outline: none; resize: vertical; background: #fffbeb; }
+        .terms-editor { width: 100%; min-height: 80px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; font-size: 12px; color: #475569; line-height: 1.5; outline: none; resize: vertical; background: #fffbeb; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .no-spin::-webkit-inner-spin-button, .no-spin::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
         
@@ -808,57 +813,58 @@ export default function AdminQuoteDetailPage() {
 
         /* CHATTER LOGÍSTICO ESTILOS */
         .chatter-box { background: #f8fafc !important; border-left: 4px solid #3b82f6 !important; }
-        .chat-viewport { max-height: 400px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; padding: 15px; background: white; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 15px; }
-        .empty-chat { text-align: center; color: #94a3b8; font-size: 13px; padding: 40px; }
+        .chat-viewport { max-height: 350px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 12px; background: white; border-radius: 10px; border: 1px solid #e2e8f0; margin-bottom: 12px; }
+        .empty-chat { text-align: center; color: #94a3b8; font-size: 12px; padding: 30px; }
         .chat-bubble-wrapper { display: flex; width: 100%; }
         .chat-bubble-wrapper.client { justify-content: flex-start; }
         .chat-bubble-wrapper.admin { justify-content: flex-end; }
-        .chat-bubble { max-width: 75%; padding: 12px 16px; border-radius: 16px; position: relative; }
+        .chat-bubble { max-width: 75%; padding: 10px 14px; border-radius: 14px; position: relative; }
         .client .chat-bubble { background: #f1f5f9; color: #1e293b; border-bottom-left-radius: 2px; }
         .admin .chat-bubble { background: #3b82f6; color: white; border-bottom-right-radius: 2px; }
-        .bubble-meta { font-size: 9px; font-weight: 800; text-transform: uppercase; margin-bottom: 4px; opacity: 0.8; }
-        .bubble-text { font-size: 13px; font-weight: 500; line-height: 1.4; }
-        .chat-input-area { display: flex; gap: 10px; background: white; padding: 10px; border-radius: 12px; border: 1px solid #e2e8f0; }
-        .chat-input-area textarea { flex: 1; border: none; resize: none; height: 45px; font-family: inherit; font-size: 13px; outline: none; }
-        .btn-send { background: #3b82f6; color: white; border: none; width: 45px; height: 45px; border-radius: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
+        .bubble-meta { font-size: 8.5px; font-weight: 800; text-transform: uppercase; margin-bottom: 3px; opacity: 0.8; }
+        .bubble-text { font-size: 12px; font-weight: 500; line-height: 1.4; }
+        
+        .chat-input-area { display: flex; gap: 8px; background: white; padding: 8px; border-radius: 10px; border: 1px solid #e2e8f0; }
+        .chat-input-area textarea { flex: 1; border: none; resize: none; height: 38px; font-family: inherit; font-size: 12px; outline: none; }
+        .btn-send { background: #3b82f6; color: white; border: none; width: 38px; height: 38px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
         .btn-send:hover:not(:disabled) { background: #2563eb; transform: scale(1.05); }
         .btn-send:disabled { background: #cbd5e1; cursor: not-allowed; }
 
         /* HISTORIAL (ESTILO ODOO COMPACTO) */
         .odoo-log-feed { display: flex; flex-direction: column; padding: 0 10px; }
-        .no-logs { padding: 20px; text-align: center; color: #94a3b8; font-size: 13px; }
+        .no-logs { padding: 15px; text-align: center; color: #94a3b8; font-size: 12px; }
         
-        .odoo-log-item { display: flex; flex-direction: column; gap: 6px; padding: 12px 0; border-bottom: 1px solid #f1f5f9; }
+        .odoo-log-item { display: flex; flex-direction: column; gap: 5px; padding: 10px 0; border-bottom: 1px solid #f1f5f9; }
         .odoo-log-item:last-child { border-bottom: none; padding-bottom: 0; }
         
-        .odoo-log-header { display: flex; align-items: center; gap: 10px; }
+        .odoo-log-header { display: flex; align-items: center; gap: 8px; }
         .odoo-avatar { 
-          width: 24px; height: 24px; background: #e2e8f0; color: #475569; 
+          width: 22px; height: 22px; background: #e2e8f0; color: #475569; 
           border-radius: 50%; display: flex; align-items: center; justify-content: center; 
-          font-size: 10px; font-weight: 800; text-transform: uppercase;
+          font-size: 9px; font-weight: 800; text-transform: uppercase;
         }
-        .odoo-meta { display: flex; align-items: center; gap: 8px; }
-        .odoo-user { font-size: 12px; font-weight: 700; color: #1e293b; text-transform: capitalize; }
-        .odoo-date { font-size: 11px; color: #94a3b8; }
+        .odoo-meta { display: flex; align-items: center; gap: 6px; }
+        .odoo-user { font-size: 11px; font-weight: 700; color: #1e293b; text-transform: capitalize; }
+        .odoo-date { font-size: 10px; color: #94a3b8; }
         
-        .odoo-log-body { padding-left: 34px; display: flex; flex-direction: column; gap: 4px; }
+        .odoo-log-body { padding-left: 30px; display: flex; flex-direction: column; gap: 3px; }
         .odoo-change-line { 
-          display: flex; align-items: center; gap: 8px; 
-          font-size: 11.5px; font-family: 'JetBrains Mono', monospace; 
+          display: flex; align-items: center; gap: 6px; 
+          font-size: 10.5px; font-family: 'JetBrains Mono', monospace; 
         }
         .o-label { 
           color: #64748b; font-weight: 600; font-family: 'Inter', sans-serif; 
-          font-size: 11px; min-width: 120px;
+          font-size: 10px; min-width: 110px;
         }
         .o-old { color: #94a3b8; text-decoration: line-through; }
         .o-arrow { color: #cbd5e1; }
         .o-new { color: #10b981; font-weight: 700; }
         
-        .log-pagination { display: flex; justify-content: center; align-items: center; gap: 20px; padding: 15px 0 0; margin-top: 10px; border-top: 1px solid #f1f5f9; }
-        .pag-btn { display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: white; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 11px; font-weight: 700; color: #64748b; cursor: pointer; transition: 0.2s; }
+        .log-pagination { display: flex; justify-content: center; align-items: center; gap: 15px; padding: 12px 0 0; margin-top: 10px; border-top: 1px solid #f1f5f9; }
+        .pag-btn { display: flex; align-items: center; gap: 5px; padding: 5px 10px; background: white; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 10px; font-weight: 700; color: #64748b; cursor: pointer; transition: 0.2s; }
         .pag-btn:hover:not(:disabled) { background: #f1f5f9; color: #1e293b; }
         .pag-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .pag-info { font-size: 11px; font-weight: 600; color: #94a3b8; }
+        .pag-info { font-size: 10px; font-weight: 600; color: #94a3b8; }
       `}</style>
     </AdminLayout>
   ); 
