@@ -29,6 +29,8 @@ const sendTwilioMessage = async (to: string, message: string, mediaUrl?: string)
       },
       body: params
     });
+    const result = await response.json();
+    console.log("📤 TWILIO RESPONSE:", result.sid);
     return response.ok;
   } catch (error) {
     console.error("❌ EXCEPCIÓN TWILIO:", error);
@@ -46,48 +48,22 @@ export const handler: Handler = async (event) => {
 
     if (!incomingMessage) return { statusCode: 200, body: "<Response></Response>" };
 
-    // 🛡️ SEGURIDAD
+    // 🛡️ SEGURIDAD FREDDY / DAVID / DAVID M.
     const AUTHORIZED_NUMBERS = ["+50763036338", "+50762256452", "+13059248876"];
     const normalizedSender = senderNumber?.startsWith('+') ? senderNumber : `+${senderNumber}`;
     if (!AUTHORIZED_NUMBERS.includes(normalizedSender)) return { statusCode: 200, body: "<Response></Response>" };
 
-    const { data: memories } = await supabase.from('agent_memory').select('rule_text');
-    const systemMemory = memories?.map(m => `- ${m.rule_text}`).join('\n') || "";
-
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-3.1-flash-lite-preview", 
+      model: "gemini-3.1-flash", 
       generationConfig: { responseMimeType: "application/json" } 
     });
 
     const prompt = `
-      Eres el Orquestador B2B de Fresh Food Panamá. Jefe: Freddy García. Gerente: David Vazquez.
-
-      INTENCIONES DE ARCHIVOS:
-      - "OBTENER_ARCHIVO": Cuando pidan un documento específico (PDF, AWB, Reporte, Factura).
-      
-      MAPEO DE TIPOS DE DOCUMENTO (doc_type):
-      - "inspeccion", "reporte de inspeccion" -> inspeccion
-      - "awb", "guia" -> awb
-      - "factura", "invoice" -> invoice
-      - "fitosanitario" -> phytosanitary
-
-      REGLAS:
-      1. Si piden "la última cotización de [Cliente]", identifica que el recurso es "quote".
-      2. Si piden "el AWB de [Cliente]" o "[Embarque]", identifica que el recurso es "shipment_file".
-      3. Respuestas directas.
-
-      JSON RESPUESTA:
-      {
-        "intent": "OBTENER_ARCHIVO" | "GESTION_COTIZACION" | "REPORTE_GERENCIAL" | "CHAT_GENERAL" | "APRENDER_REGLA",
-        "file_request": {
-          "resource": "quote" | "shipment_file",
-          "client_name": "Nombre del cliente si se menciona",
-          "doc_type": "awb | inspeccion | invoice | phytosanitary",
-          "code": "Código si se menciona (Q-XXX o SHP-XXX)"
-        },
-        "chat_response": "..."
-      }
-
+      Eres el Orquestador Operativo de Fresh Food Panamá.
+      INTENCIÓN "OBTENER_ARCHIVO":
+      - Si piden "enviame", "pasame", "mandame" un PDF, AWB, Factura o Reporte.
+      MAPEO DOC_TYPE: "awb", "guia", "inspeccion", "reporte", "factura", "invoice".
+      JSON: { "intent": "OBTENER_ARCHIVO", "file_request": { "resource": "quote" | "shipment_file", "client_name": "...", "doc_type": "...", "code": "..." } }
       Mensaje: "${incomingMessage}"
     `;
 
@@ -97,64 +73,56 @@ export const handler: Handler = async (event) => {
 
     if (ai.intent === "OBTENER_ARCHIVO") {
       const fr = ai.file_request;
-      
-      // --- CASO A: COTIZACIÓN (Generada por sistema) ---
+      let fileUrl = "";
+      let fileName = "";
+
       if (fr.resource === "quote") {
-        let query = supabase.from('quotes').select('id, quote_number, client_snapshot').order('created_at', { ascending: false });
-        
-        if (fr.code) query = query.ilike('quote_number', `%${fr.code}%`);
+        let qQuery = supabase.from('quotes').select('id, quote_number').order('created_at', { ascending: false });
+        if (fr.code) qQuery = qQuery.ilike('quote_number', `%${fr.code}%`);
         else if (fr.client_name) {
-            const { data: client } = await supabase.from('clients').select('id').ilike('name', `%${fr.client_name}%`).limit(1).single();
-            if (client) query = query.eq('client_id', client.id);
+          const { data: cl } = await supabase.from('clients').select('id').ilike('name', `%${fr.client_name}%`).limit(1).single();
+          if (cl) qQuery = qQuery.eq('client_id', cl.id);
         }
-
-        const { data: quote } = await query.limit(1).single();
-        if (!quote) return { statusCode: 200, body: `<Response><Message>Jefe, no encontré esa cotización.</Message></Response>` };
-
-        const pdfUrl = `${baseUrl}/.netlify/functions/renderQuotePdf?id=${quote.id}`;
-        await sendTwilioMessage(normalizedSender, `📄 Aquí tiene la cotización ${quote.quote_number} de ${quote.client_snapshot?.name}`, pdfUrl);
-        return { statusCode: 200, body: `<Response></Response>` };
-      }
-
-      // --- CASO B: ARCHIVO DE EMBARQUE (AWB, Inspección, etc.) ---
+        const { data: quote } = await qQuery.limit(1).maybeSingle();
+        if (quote) {
+            fileUrl = `${baseUrl}/.netlify/functions/renderQuotePdf?id=${quote.id}`;
+            fileName = `Cotización ${quote.quote_number}`;
+        }
+      } 
       else if (fr.resource === "shipment_file") {
-        let shipQuery = supabase.from('shipments').select('id, code').order('created_at', { ascending: false });
-        
-        if (fr.code) shipQuery = shipQuery.ilike('code', `%${fr.code}%`);
+        let sQuery = supabase.from('shipments').select('id, code').order('created_at', { ascending: false });
+        if (fr.code) sQuery = sQuery.ilike('code', `%${fr.code}%`);
         else if (fr.client_name) {
-            const { data: client } = await supabase.from('clients').select('id').ilike('name', `%${fr.client_name}%`).limit(1).single();
-            if (client) shipQuery = shipQuery.eq('client_id', client.id);
+          const { data: cl } = await supabase.from('clients').select('id').ilike('name', `%${fr.client_name}%`).limit(1).single();
+          if (cl) sQuery = sQuery.eq('client_id', cl.id);
         }
-
-        const { data: ship } = await shipQuery.limit(1).single();
-        if (!ship) return { statusCode: 200, body: `<Response><Message>Jefe, no encontré el embarque para ese archivo.</Message></Response>` };
-
-        // Buscamos el archivo en shipment_files por tipo
-        const { data: file } = await supabase.from('shipment_files')
-            .select('storage_path, filename')
+        const { data: ship } = await sQuery.limit(1).maybeSingle();
+        
+        if (ship) {
+          const { data: file } = await supabase.from('shipment_files')
+            .select('storage_path, doc_type')
             .eq('shipment_id', ship.id)
-            .ilike('doc_type', `%${fr.doc_type}%`)
-            .order('created_at', { ascending: false })
-            .limit(1).single();
+            .ilike('doc_type', `%${fr.doc_type || ''}%`)
+            .limit(1).maybeSingle();
 
-        if (!file) return { statusCode: 200, body: `<Response><Message>Jefe, el embarque ${ship.code} no tiene subido el documento tipo: ${fr.doc_type}</Message></Response>` };
-
-        // Generamos la URL firmada o pública de Supabase Storage
-        const { data: signedUrl } = await supabase.storage.from('shipments').createSignedUrl(file.storage_path, 600);
-
-        await sendTwilioMessage(normalizedSender, `📦 Aquí tiene el ${fr.doc_type} del embarque ${ship.code}`, signedUrl?.signedUrl);
-        return { statusCode: 200, body: `<Response></Response>` };
+          if (file) {
+            const { data: signed } = await supabase.storage.from('shipments').createSignedUrl(file.storage_path, 3600);
+            fileUrl = signed?.signedUrl || "";
+            fileName = `${file.doc_type.toUpperCase()} - ${ship.code}`;
+          }
+        }
       }
+
+      if (fileUrl) {
+        // EL CAMBIO CLAVE: Esperar el envío antes de responder a Netlify
+        const sent = await sendTwilioMessage(normalizedSender, `📄 Aquí tiene: ${fileName}`, fileUrl);
+        if (sent) return { statusCode: 200, body: "<Response></Response>" };
+      }
+      
+      return { statusCode: 200, body: `<Response><Message>⚠️ Jefe, encontré el registro pero no pude generar el archivo adjunto. Verifique si el archivo físico existe en Storage.</Message></Response>` };
     }
 
-    // ... (Mantener aquí tus otros else if de GESTION_COTIZACION, REPORTE_GERENCIAL, etc.)
-    
-    // Fallback conversacional si no es archivo
-    else if (ai.chat_response) {
-        return { statusCode: 200, body: `<Response><Message>${ai.chat_response}</Message></Response>` };
-    }
-
-    return { statusCode: 200, body: `<Response><Message>Entendido Jefe.</Message></Response>` };
+    return { statusCode: 200, body: `<Response><Message>Entendido Jefe Freddy.</Message></Response>` };
 
   } catch (error: any) {
     return { statusCode: 200, body: `<Response><Message>⚠️ Error: ${error.message}</Message></Response>` };
