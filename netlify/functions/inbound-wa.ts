@@ -71,11 +71,12 @@ export const handler: Handler = async (event) => {
     const ai = JSON.parse(result.response.text());
     const baseUrl = process.env.URL || 'https://app.freshfoodpanama.com';
 
-    if (ai.intent === "OBTENER_ARCHIVO") {
+   if (ai.intent === "OBTENER_ARCHIVO") {
       const fr = ai.file_request;
       let fileUrl = "";
       let fileName = "";
 
+      // --- CASO A: COTIZACIÓN (PDF Dinámico) ---
       if (fr.resource === "quote") {
         let qQuery = supabase.from('quotes').select('id, quote_number').order('created_at', { ascending: false });
         if (fr.code) qQuery = qQuery.ilike('quote_number', `%${fr.code}%`);
@@ -89,6 +90,7 @@ export const handler: Handler = async (event) => {
             fileName = `Cotización ${quote.quote_number}`;
         }
       } 
+      // --- CASO B: ARCHIVOS Y FOTOS (Storage) ---
       else if (fr.resource === "shipment_file") {
         let sQuery = supabase.from('shipments').select('id, code').order('created_at', { ascending: false });
         if (fr.code) sQuery = sQuery.ilike('code', `%${fr.code}%`);
@@ -99,27 +101,47 @@ export const handler: Handler = async (event) => {
         const { data: ship } = await sQuery.limit(1).maybeSingle();
         
         if (ship) {
+          // Buscamos en la tabla de archivos
           const { data: file } = await supabase.from('shipment_files')
-            .select('storage_path, doc_type')
+            .select('storage_path, doc_type, bucket')
             .eq('shipment_id', ship.id)
             .ilike('doc_type', `%${fr.doc_type || ''}%`)
+            .order('created_at', { ascending: false })
             .limit(1).maybeSingle();
 
           if (file) {
-            const { data: signed } = await supabase.storage.from('shipments').createSignedUrl(file.storage_path, 3600);
-            fileUrl = signed?.signedUrl || "";
-            fileName = `${file.doc_type.toUpperCase()} - ${ship.code}`;
+            // Lógica de Bucket Dinámica:
+            // Si el doc_type es 'foto', usa el bucket de fotos, si no, usa 'shipment-files'
+            const bucketName = file.bucket || (file.doc_type.includes('foto') ? 'shipment-photos' : 'shipment-files');
+            
+            // Limpiamos la ruta por si acaso viene con el nombre del bucket al inicio
+            const cleanPath = file.storage_path.includes('/') 
+              ? file.storage_path.split('/').slice(1).join('/') 
+              : file.storage_path;
+
+            console.log(`📂 Descargando de Bucket: ${bucketName} | Path: ${cleanPath}`);
+
+            const { data: signed } = await supabase.storage
+              .from(bucketName)
+              .createSignedUrl(cleanPath, 3600);
+
+            if (signed?.signedUrl) {
+              fileUrl = signed.signedUrl;
+              fileName = `${file.doc_type.toUpperCase()} - ${ship.code}`;
+            }
           }
         }
       }
 
       if (fileUrl) {
-        // EL CAMBIO CLAVE: Esperar el envío antes de responder a Netlify
         const sent = await sendTwilioMessage(normalizedSender, `📄 Aquí tiene: ${fileName}`, fileUrl);
         if (sent) return { statusCode: 200, body: "<Response></Response>" };
       }
       
-      return { statusCode: 200, body: `<Response><Message>⚠️ Jefe, encontré el registro pero no pude generar el archivo adjunto. Verifique si el archivo físico existe en Storage.</Message></Response>` };
+      return { 
+        statusCode: 200, 
+        body: `<Response><Message>⚠️ Jefe, encontré el registro del ${fr.doc_type || 'archivo'} pero no logré conectar con el archivo físico en el bucket '${fr.doc_type?.includes('foto') ? 'fotos' : 'shipment-files'}'.</Message></Response>` 
+      };
     }
 
     return { statusCode: 200, body: `<Response><Message>Entendido Jefe Freddy.</Message></Response>` };
