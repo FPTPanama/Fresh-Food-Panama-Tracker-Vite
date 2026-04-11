@@ -75,8 +75,9 @@ export const handler: Handler = async (event) => {
       const fr = ai.file_request;
       let fileUrl = "";
       let fileName = "";
+      let errorDetail = "";
 
-      // --- CASO A: COTIZACIÓN (PDF Dinámico) ---
+      // --- CASO A: COTIZACIÓN ---
       if (fr.resource === "quote") {
         let qQuery = supabase.from('quotes').select('id, quote_number').order('created_at', { ascending: false });
         if (fr.code) qQuery = qQuery.ilike('quote_number', `%${fr.code}%`);
@@ -88,9 +89,11 @@ export const handler: Handler = async (event) => {
         if (quote) {
             fileUrl = `${baseUrl}/.netlify/functions/renderQuotePdf?id=${quote.id}`;
             fileName = `Cotización ${quote.quote_number}`;
+        } else {
+            errorDetail = "No encontré la cotización en la base de datos.";
         }
       } 
-      // --- CASO B: ARCHIVOS Y FOTOS (Storage) ---
+      // --- CASO B: ARCHIVOS (AWB, INSPECCIÓN, FOTOS) ---
       else if (fr.resource === "shipment_file") {
         let sQuery = supabase.from('shipments').select('id, code').order('created_at', { ascending: false });
         if (fr.code) sQuery = sQuery.ilike('code', `%${fr.code}%`);
@@ -101,46 +104,50 @@ export const handler: Handler = async (event) => {
         const { data: ship } = await sQuery.limit(1).maybeSingle();
         
         if (ship) {
-          // Buscamos en la tabla de archivos
           const { data: file } = await supabase.from('shipment_files')
-            .select('storage_path, doc_type, bucket')
+            .select('storage_path, doc_type')
             .eq('shipment_id', ship.id)
             .ilike('doc_type', `%${fr.doc_type || ''}%`)
             .order('created_at', { ascending: false })
             .limit(1).maybeSingle();
 
           if (file) {
-            // Lógica de Bucket Dinámica:
-            // Si el doc_type es 'foto', usa el bucket de fotos, si no, usa 'shipment-files'
-            const bucketName = file.bucket || (file.doc_type.includes('foto') ? 'shipment-photos' : 'shipment-files');
+            // MAPEO REAL SEGÚN TUS BUCKETS
+            const isPhoto = file.doc_type.toLowerCase().includes('foto');
+            const bucketName = isPhoto ? 'shipment-photos' : 'shipment-docs';
             
-            // Limpiamos la ruta por si acaso viene con el nombre del bucket al inicio
-            const cleanPath = file.storage_path.includes('/') 
-              ? file.storage_path.split('/').slice(1).join('/') 
-              : file.storage_path;
+            // LIMPIEZA DE RUTA: Eliminamos el nombre del bucket si viene incluido en el path
+            const cleanPath = file.storage_path.replace(`${bucketName}/`, '');
 
-            console.log(`📂 Descargando de Bucket: ${bucketName} | Path: ${cleanPath}`);
+            console.log(`📂 Intentando: Bucket[${bucketName}] Path[${cleanPath}]`);
 
-            const { data: signed } = await supabase.storage
+            const { data: signed, error: sErr } = await supabase.storage
               .from(bucketName)
               .createSignedUrl(cleanPath, 3600);
 
             if (signed?.signedUrl) {
-              fileUrl = signed.signedUrl;
-              fileName = `${file.doc_type.toUpperCase()} - ${ship.code}`;
+                fileUrl = signed.signedUrl;
+                fileName = `${file.doc_type.toUpperCase()} - ${ship.code}`;
+            } else {
+                errorDetail = `Error de Storage en bucket '${bucketName}': ${sErr?.message || 'Archivo no encontrado en la ruta física'}`;
             }
+          } else {
+            errorDetail = `No hay ningún archivo tipo '${fr.doc_type}' registrado para este embarque.`;
           }
+        } else {
+          errorDetail = "No encontré el embarque asociado a ese cliente o código.";
         }
       }
 
       if (fileUrl) {
-        const sent = await sendTwilioMessage(normalizedSender, `📄 Aquí tiene: ${fileName}`, fileUrl);
+        const sent = await sendTwilioMessage(normalizedSender, `📄 Aquí tiene Jefe Freddy: ${fileName}`, fileUrl);
         if (sent) return { statusCode: 200, body: "<Response></Response>" };
       }
       
+      // Mensaje de error dinámico y honesto
       return { 
         statusCode: 200, 
-        body: `<Response><Message>⚠️ Jefe, encontré el registro del ${fr.doc_type || 'archivo'} pero no logré conectar con el archivo físico en el bucket '${fr.doc_type?.includes('foto') ? 'fotos' : 'shipment-files'}'.</Message></Response>` 
+        body: `<Response><Message>⚠️ Jefe, no pude enviarle el archivo. \n\nMotivo: ${errorDetail}</Message></Response>` 
       };
     }
 
