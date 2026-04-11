@@ -55,7 +55,7 @@ export const handler: Handler = async (event) => {
     const systemMemory = memories?.map(m => `- ${m.rule_text}`).join('\n') || "";
 
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-3.1-flash", 
+      model: "gemini-3.1-flash-lite-preview", 
       generationConfig: { responseMimeType: "application/json" } 
     });
 
