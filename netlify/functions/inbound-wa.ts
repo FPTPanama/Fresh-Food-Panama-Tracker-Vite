@@ -54,7 +54,7 @@ export const handler: Handler = async (event) => {
       : "Ninguna regla aprendida aún.";
 
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-3.1-flash", 
+      model: "gemini-3.1-flash-lite-preview", 
       generationConfig: { responseMimeType: "application/json" }
     });
 
