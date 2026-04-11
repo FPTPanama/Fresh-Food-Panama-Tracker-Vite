@@ -47,43 +47,59 @@ export const handler: Handler = async (event) => {
 
     console.log(`\n📩 CHATOPS IN: "${incomingMessage}" de ${senderNumber}`);
 
+    // --- 🧠 EXTRACCIÓN DE LA MEMORIA A LARGO PLAZO ---
+    const { data: memories } = await supabase.from('agent_memory').select('rule_text');
+    const systemMemory = memories && memories.length > 0 
+      ? memories.map(m => `- ${m.rule_text}`).join('\n') 
+      : "Ninguna regla aprendida aún.";
+
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-3.1-flash-lite-preview", 
+      model: "gemini-3.1-flash", 
       generationConfig: { responseMimeType: "application/json" }
     });
 
     const prompt = `
       Eres el Orquestador B2B de Fresh Food Panamá.
       
+      CONTEXTO EQUIPO:
+      - David Vazquez (Gerente)
+      - Ricardo Boccardo "Pipo" (Ventas)
+      - Victor Centeno (Ventas)
+      - Ronald Chanis (Inspector)
+      - Pedro Rojas (Finanzas)
+      - Candida Ojo (Documental)
+      - Katia Peralta (Logística)
+
+      REGLAS DE NEGOCIO APRENDIDAS (MEMORIA):
+      Debes aplicar estas reglas a cualquier acción que realices si son relevantes:
+      ${systemMemory}
+      
       CLASIFICACIÓN DE INTENCIONES:
-      1. "GESTION_COTIZACION": Crear cotización. (Requiere: Cliente, Destino, Pallets, Precio).
+      1. "GESTION_COTIZACION": Crear cotización.
       2. "APROBAR_COTIZACION": Aprobar un borrador.
-      3. "CONSULTA_EMBARQUE_DETALLE": Pedir estatus de un embarque (ej. SHP-1234).
-      4. "CREAR_CLIENTE": Registrar cliente. (Requiere: Nombre y Email).
-      5. "GENERAR_DOCUMENTO": Generar PDF (Factura/Cotización) de un número específico.
-      6. "GESTION_INVENTARIO": Consultar o actualizar stock (ej. cajas, corbatines).
-      7. "REPORTE_GERENCIAL": Piden métricas generales de tablas.
+      3. "CONSULTA_EMBARQUE_DETALLE": Pedir estatus de un embarque.
+      4. "CREAR_CLIENTE": Registrar cliente.
+      5. "GENERAR_DOCUMENTO": Generar PDF (Factura/Cotización).
+      6. "GESTION_INVENTARIO": Consultar o actualizar stock.
+      7. "REPORTE_GERENCIAL": Piden métricas generales.
       8. "INSTRUCCION_DIRECTA": Ordenan a alguien del equipo.
+      9. "APRENDER_REGLA": El usuario te pide que aprendas, recuerdes o anotes una nueva regla o política de la empresa.
+      10. "CHAT_GENERAL": El usuario hace una pregunta general, saluda, o intenta conversar.
       
       JSON ESTRICTO DE RESPUESTA:
       {
-        "intent": "GESTION_COTIZACION" | "APROBAR_COTIZACION" | "CONSULTA_EMBARQUE_DETALLE" | "CREAR_CLIENTE" | "GENERAR_DOCUMENTO" | "GESTION_INVENTARIO" | "REPORTE_GERENCIAL" | "INSTRUCCION_DIRECTA",
+        "intent": "GESTION_COTIZACION" | "APROBAR_COTIZACION" | "CONSULTA_EMBARQUE_DETALLE" | "CREAR_CLIENTE" | "GENERAR_DOCUMENTO" | "GESTION_INVENTARIO" | "REPORTE_GERENCIAL" | "INSTRUCCION_DIRECTA" | "APRENDER_REGLA" | "CHAT_GENERAL",
         
-        "quote_data": { "ready": boolean, "reply_to_user": "...", "client_name": "...", "destination": "...", "pallets": 0, "price": 0 },
+        "chat_response": "Respuesta natural y conversacional",
         
-        "shipment_query": { "code": "Ej: SHP-1234" },
-        
-        "client_data": { "ready": boolean, "reply_to_user": "...", "name": "...", "email": "...", "phone": "...", "tax_id": "..." },
-        
-        "doc_query": { "reference_code": "Ej: Q-2024-001" },
+        "new_rule": "Texto claro y conciso de la regla que debes memorizar (Solo si el intent es APRENDER_REGLA)",
 
-        "inventory_data": { 
-          "action": "consultar" | "actualizar",
-          "updates": [ { "item_name": "Cajas", "operation": "add" | "subtract" | "set", "amount": 100 } ]
-        },
-        
+        "quote_data": { "ready": boolean, "reply_to_user": "...", "client_name": "...", "destination": "...", "pallets": 0, "price": 0 },
+        "shipment_query": { "code": "..." },
+        "client_data": { "ready": boolean, "reply_to_user": "...", "name": "...", "email": "...", "phone": "...", "tax_id": "..." },
+        "doc_query": { "reference_code": "..." },
+        "inventory_data": { "action": "consultar" | "actualizar", "updates": [ { "item_name": "Cajas", "operation": "add" | "subtract" | "set", "amount": 100 } ] },
         "query_config": { "table": "quotes" | "shipments", "filter_status": "...", "limit": 3 },
-        
         "tasks": [ { "target": "Persona", "message_to_send": "..." } ]
       }
 
@@ -95,17 +111,27 @@ export const handler: Handler = async (event) => {
     const baseUrl = process.env.URL || 'https://app.freshfoodpanama.com';
 
     // ==========================================
+    // 🧠 NUEVO FLUJO: APRENDER REGLAS
+    // ==========================================
+    if (ai.intent === "APRENDER_REGLA" && ai.new_rule) {
+      const { error: memErr } = await supabase.from('agent_memory').insert({ rule_text: ai.new_rule });
+      
+      if (memErr) {
+        return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>⚠️ Jefe, tuve un problema guardando eso en mi memoria: ${memErr.message}</Message></Response>` };
+      }
+      return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>🧠 ¡Anotado Jefe! A partir de ahora recordaré que: "${ai.new_rule}"</Message></Response>` };
+    }
+
+    // ==========================================
     // 1. INVENTARIO (Consultas y Actualizaciones)
     // ==========================================
-    if (ai.intent === "GESTION_INVENTARIO") {
+    else if (ai.intent === "GESTION_INVENTARIO") {
       const inv = ai.inventory_data;
-      
       if (inv.action === "actualizar" && inv.updates?.length > 0) {
         let msg = "✅ *INVENTARIO ACTUALIZADO:*\n\n";
         for (const u of inv.updates) {
           const { data: current } = await supabase.from('inventory').select('quantity').ilike('item_name', u.item_name).single();
           let newQty = u.amount;
-          
           if (current) {
             if (u.operation === 'add') newQty = current.quantity + u.amount;
             if (u.operation === 'subtract') newQty = current.quantity - u.amount;
@@ -116,9 +142,7 @@ export const handler: Handler = async (event) => {
           msg += `📦 ${u.item_name}: *${newQty} uds* \n`;
         }
         return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>${msg}</Message></Response>` };
-      } 
-      else {
-        // Solo consultar
+      } else {
         const { data: items } = await supabase.from('inventory').select('*').order('item_name');
         let msg = "📦 *ESTADO DEL INVENTARIO:*\n\n";
         if (!items || items.length === 0) msg += "No hay items registrados.";
@@ -133,11 +157,8 @@ export const handler: Handler = async (event) => {
     else if (ai.intent === "GENERAR_DOCUMENTO") {
       const code = ai.doc_query?.reference_code;
       if (!code) return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>⚠️ Por favor especifica el número de documento que deseas generar.</Message></Response>` };
-      
       const { data: q } = await supabase.from('quotes').select('id, quote_number, status').ilike('quote_number', `%${code}%`).single();
-      
       if (q) {
-        // Asume endpoint estándar de PDFs. Si creas uno de facturas, puedes cambiar la ruta aquí.
         const url = `${baseUrl}/.netlify/functions/renderQuotePdf?id=${q.id}`;
         return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>📄 *Documento Generado: ${q.quote_number}*\nEstado: ${q.status}\n\nEnlace seguro:\n${url}</Message></Response>` };
       }
@@ -149,18 +170,14 @@ export const handler: Handler = async (event) => {
     // ==========================================
     else if (ai.intent === "CONSULTA_EMBARQUE_DETALLE" && ai.shipment_query?.code) {
       const code = ai.shipment_query.code;
-      
       const { data: ship, error: shipErr } = await supabase.from('shipments').select('*').ilike('code', `%${code}%`).single();
       if (shipErr || !ship) return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>⚠️ No encontré el embarque "${code}". Verifica el número.</Message></Response>` };
 
-      // Buscar documentos reales en shipment_files
       const { data: docs } = await supabase.from('shipment_files').select('doc_type').eq('shipment_id', ship.id);
-      
       const requiredDocs = { 'invoice': 'Factura', 'packing_list': 'Packing List', 'awb': 'AWB / BL', 'phytosanitary': 'Fitosanitario', 'export_declaration': 'Decl. Exportación' };
       const uploadedTypes = docs?.map(d => d.doc_type) || [];
       const missingDocs = Object.entries(requiredDocs).filter(([key]) => !uploadedTypes.includes(key)).map(([_, label]) => label);
 
-      // Vuelos
       let flightInfo = `Vuelo: ${ship.flight_number || 'Por asignar'}`;
       if (ship.status === 'IN_TRANSIT' || ship.flight_departure_time) {
         const dep = ship.flight_departure_time ? new Date(ship.flight_departure_time).toLocaleString('es-PA', {hour: '2-digit', minute:'2-digit', day:'2-digit', month:'short'}) : 'TBD';
@@ -238,6 +255,7 @@ export const handler: Handler = async (event) => {
         supabase.from('profiles').select('position, phone, full_name'),
         supabase.from('external_partners').select('position, phone, full_name')
       ]);
+
       const directory = [...(internal || []), ...(external || [])];
       
       let confirmMsg = "✅ Tareas asignadas:\n";
@@ -251,6 +269,17 @@ export const handler: Handler = async (event) => {
         }
       }
       return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>${confirmMsg}</Message></Response>` };
+    }
+
+    // ==========================================
+    // FLUJO 9: CHARLA GENERAL / PREGUNTAS
+    // ==========================================
+    else if (ai.intent === "CHAT_GENERAL" && ai.chat_response) {
+      return { 
+        statusCode: 200, 
+        headers: { "Content-Type": "text/xml" }, 
+        body: `<Response><Message>${ai.chat_response}</Message></Response>` 
+      };
     }
 
     return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>✅ Comando recibido, pero no logré clasificar la acción.</Message></Response>` };
