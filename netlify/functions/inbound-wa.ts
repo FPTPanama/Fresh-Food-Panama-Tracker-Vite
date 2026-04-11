@@ -54,7 +54,7 @@ export const handler: Handler = async (event) => {
     if (!AUTHORIZED_NUMBERS.includes(normalizedSender)) return { statusCode: 200, body: "<Response></Response>" };
 
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-3.1-flash", 
+      model: "gemini-3.1-flash-lite-preview", 
       generationConfig: { responseMimeType: "application/json" } 
     });
 
