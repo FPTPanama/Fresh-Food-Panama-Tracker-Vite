@@ -45,6 +45,31 @@ export const handler: Handler = async (event) => {
 
     if (!incomingMessage) return { statusCode: 200, body: "<Response></Response>" };
 
+    // ==========================================
+    // 🛡️ ESCUDO DE SEGURIDAD (LISTA BLANCA)
+    // ==========================================
+    const AUTHORIZED_NUMBERS = [
+      "+50761234567", // <-- Reemplaza con tu número (Freddy)
+      "+50762256452",
+      "+13059248876",// <-- Reemplaza con el número de David
+      // "AÑADE_MAS_NUMEROS_AQUI_ENTRE_COMILLAS"
+    ];
+
+    // Aseguramos que el número tenga el símbolo + para compararlo bien
+    const normalizedSender = senderNumber?.startsWith('+') ? senderNumber : `+${senderNumber}`;
+
+    if (!AUTHORIZED_NUMBERS.includes(normalizedSender)) {
+      console.warn(`🚨 ALERTA DE INTRUSO: Intento de acceso denegado desde el número ${normalizedSender}`);
+      
+      // Devolvemos una respuesta vacía. El intruso no recibirá NADA, pensará que el número no funciona.
+      return { 
+        statusCode: 200, 
+        headers: { "Content-Type": "text/xml" }, 
+        body: `<Response></Response>` 
+      };
+    }
+    // ==========================================
+
     console.log(`\n📩 CHATOPS IN: "${incomingMessage}" de ${senderNumber}`);
 
     // --- 🧠 EXTRACCIÓN DE LA MEMORIA A LARGO PLAZO ---
@@ -60,50 +85,58 @@ export const handler: Handler = async (event) => {
 
     const prompt = `
       Eres el Orquestador B2B de Fresh Food Panamá.
-      
-      CONTEXTO EQUIPO:
-      - David Vazquez (Gerente)
-      - Ricardo Boccardo "Pipo" (Ventas)
-      - Victor Centeno (Ventas)
-      - Ronald Chanis (Inspector)
-      - Pedro Rojas (Finanzas)
-      - Candida Ojo (Documental)
-      - Katia Peralta (Logística)
+      Respondes directamente a Freddy García (El Jefe / Creador del Sistema) y asistes a David Vazquez (Gerente General).
 
-      REGLAS DE NEGOCIO APRENDIDAS (MEMORIA):
-      Debes aplicar estas reglas a cualquier acción que realices si son relevantes:
+      CONTEXTO EQUIPO:
+      - Ricardo Boccardo "Pipo" & Victor Centeno (Ventas)
+      - Ronald Chanis (Inspector), Pedro Rojas (Finanzas)
+      - Candida Ojo (Documental), Katia Peralta (Logística)
+
+      REGLAS DE MEMORIA:
       ${systemMemory}
+
+      REGLAS CONVERSACIONALES Y DE FORMATO (¡ESTRICTAS E INQUEBRANTABLES!):
+      1. ETIQUETADO DE CLIENTE: SIEMPRE que menciones un número de cotización, embarque o AWB, DEBES incluir el nombre del cliente. (Ej: "Cotización Q-123 de Global Fruits", "Embarque SHP-456 de Importadora Rey"). NUNCA envíes un código solo.
+      2. SUPERLATIVOS: Si te piden "el último", "el más reciente", usa "limit": 1 en tu query_config.
+      3. BÚSQUEDA POR CONTEXTO: Si te piden "la cotización de ayer", "el embarque de Madrid" o "de Global Fruits", pon esa palabra clave en "search_term" dentro de query_config.
+      4. DESEMPATE: Si buscan "la cotización de ayer" y el sistema devuelve varias, lístalas todas cumpliendo la Regla 1 y pregúntale a Freddy a cuál se refiere. NUNCA te quedes mudo ni asumas.
+      5. PENDIENTES: Si Freddy dice "¿Qué tenemos pendiente?", usa REPORTE_GERENCIAL con filter_status: "draft" para cotizaciones.
+      6. SALUDOS OPERATIVOS: Si te dicen "Buenos días" o "Cómo vamos", responde con un tono proactivo en CHAT_GENERAL indicando que estás listo para operar.
+      7. CORRECCIONES: Si te dice "Me equivoqué, ponle X", corrige el dato sin reiniciar todo el flujo.
+      8. TONO EJECUTIVO: Freddy quiere respuestas al grano. Cero rodeos. Usa "Entendido Jefe", "Listo Freddy" o "Anotado". Nada de "Con gusto le ayudo".
       
       CLASIFICACIÓN DE INTENCIONES:
-      1. "GESTION_COTIZACION": Crear cotización.
+      1. "GESTION_COTIZACION": Crear cotización (Requiere: Cliente, Destino, Pallets, Precio).
       2. "APROBAR_COTIZACION": Aprobar un borrador.
-      3. "CONSULTA_EMBARQUE_DETALLE": Pedir estatus de un embarque.
+      3. "CONSULTA_EMBARQUE_DETALLE": Pedir estatus de un embarque específico.
       4. "CREAR_CLIENTE": Registrar cliente.
       5. "GENERAR_DOCUMENTO": Generar PDF (Factura/Cotización).
-      6. "GESTION_INVENTARIO": Consultar o actualizar stock.
-      7. "REPORTE_GERENCIAL": Piden métricas generales.
-      8. "INSTRUCCION_DIRECTA": Ordenan a alguien del equipo.
-      9. "APRENDER_REGLA": El usuario te pide que aprendas, recuerdes o anotes una nueva regla o política de la empresa.
-      10. "CHAT_GENERAL": El usuario hace una pregunta general, saluda, o intenta conversar.
+      6. "GESTION_INVENTARIO": Consultar/actualizar stock.
+      7. "REPORTE_GERENCIAL": Pedir listas, "el último", búsquedas por destino/cliente, o pendientes.
+      8. "INSTRUCCION_DIRECTA": Órdenes al equipo.
+      9. "APRENDER_REGLA": Memorizar política/regla en la base de datos.
+      10. "CHAT_GENERAL": Saludos o preguntas fuera de la operación.
       
       JSON ESTRICTO DE RESPUESTA:
       {
         "intent": "GESTION_COTIZACION" | "APROBAR_COTIZACION" | "CONSULTA_EMBARQUE_DETALLE" | "CREAR_CLIENTE" | "GENERAR_DOCUMENTO" | "GESTION_INVENTARIO" | "REPORTE_GERENCIAL" | "INSTRUCCION_DIRECTA" | "APRENDER_REGLA" | "CHAT_GENERAL",
-        
-        "chat_response": "Respuesta natural y conversacional",
-        
-        "new_rule": "Texto claro y conciso de la regla que debes memorizar (Solo si el intent es APRENDER_REGLA)",
-
+        "chat_response": "Respuesta natural, directa y ejecutiva",
+        "new_rule": "Texto de la regla a memorizar",
         "quote_data": { "ready": boolean, "reply_to_user": "...", "client_name": "...", "destination": "...", "pallets": 0, "price": 0 },
         "shipment_query": { "code": "..." },
         "client_data": { "ready": boolean, "reply_to_user": "...", "name": "...", "email": "...", "phone": "...", "tax_id": "..." },
         "doc_query": { "reference_code": "..." },
         "inventory_data": { "action": "consultar" | "actualizar", "updates": [ { "item_name": "Cajas", "operation": "add" | "subtract" | "set", "amount": 100 } ] },
-        "query_config": { "table": "quotes" | "shipments", "filter_status": "...", "limit": 3 },
+        "query_config": { 
+          "table": "quotes" | "shipments", 
+          "filter_status": "opcional", 
+          "search_term": "opcional (ej. nombre del cliente, destino, o fecha como 'ayer')",
+          "limit": 3 
+        },
         "tasks": [ { "target": "Persona", "message_to_send": "..." } ]
       }
 
-      Mensaje del Jefe: "${incomingMessage}"
+      Mensaje de Freddy: "${incomingMessage}"
     `;
 
     const result = await model.generateContent(prompt);
