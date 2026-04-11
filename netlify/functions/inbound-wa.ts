@@ -5,7 +5,6 @@ import { createClient } from "@supabase/supabase-js";
 const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
-// 1. Ajustamos la función para que devuelva 'true' si tuvo éxito o 'false' si falló
 const sendTwilioMessage = async (to: string, message: string): Promise<boolean> => {
   const sid = process.env.TWILIO_ACCOUNT_SID?.trim();
   const token = process.env.TWILIO_AUTH_TOKEN?.trim();
@@ -14,8 +13,6 @@ const sendTwilioMessage = async (to: string, message: string): Promise<boolean> 
   const finalFrom = fromEnv.startsWith('whatsapp:') ? fromEnv : `whatsapp:${fromEnv}`;
   const cleanTo = to.replace(/\s+/g, '');
   const finalTo = cleanTo.startsWith('whatsapp:') ? cleanTo : `whatsapp:${cleanTo.startsWith('+') ? cleanTo : '+' + cleanTo}`;
-
-  console.log(`🔍 DIAGNÓSTICO: Usando SID: ...${sid?.slice(-5)} | From: ${finalFrom} | To: ${finalTo}`);
 
   const params = new URLSearchParams();
   params.append("To", finalTo);
@@ -31,14 +28,7 @@ const sendTwilioMessage = async (to: string, message: string): Promise<boolean> 
       },
       body: params
     });
-
-    const data = await response.json();
-    if (!response.ok) {
-      console.error("❌ ERROR TWILIO:", JSON.stringify(data, null, 2));
-      return false;
-    }
-    console.log(`✅ MENSAJE ENVIADO. SID: ${data.sid}`);
-    return true;
+    return response.ok;
   } catch (error) {
     console.error("❌ EXCEPCIÓN TWILIO:", error);
     return false;
@@ -55,133 +45,218 @@ export const handler: Handler = async (event) => {
 
     if (!incomingMessage) return { statusCode: 200, body: "<Response></Response>" };
 
-    console.log(`\n📩 NUEVO MENSAJE CHATOPS: "${incomingMessage}" de ${senderNumber}`);
+    console.log(`\n📩 CHATOPS IN: "${incomingMessage}" de ${senderNumber}`);
 
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-2.5-flash", 
+      model: "gemini-3.1-flash", 
       generationConfig: { responseMimeType: "application/json" }
     });
 
-    // 2. Prompt unificado y preciso
     const prompt = `
-      Eres el Orquestador Operador de Fresh Food Panamá.
+      Eres el Orquestador B2B de Fresh Food Panamá.
       
-      CONTEXTO EQUIPO:
-      - David Vazquez (Gerente)
-      - Ricardo Boccardo "Pipo" (Ventas)
-      - Victor Centeno (Ventas)
-      - Ronald Chanis (Inspector)
-      - Pedro Rojas (Finanzas / Administrativo)
-      - Daniel Vazquez (Marketing / Diseño)
-      - Candida Ojo (Documental)
-      - Katia Peralta (Logística)
+      CLASIFICACIÓN DE INTENCIONES:
+      1. "GESTION_COTIZACION": Crear cotización. (Requiere: Cliente, Destino, Pallets, Precio).
+      2. "APROBAR_COTIZACION": Aprobar un borrador.
+      3. "CONSULTA_EMBARQUE_DETALLE": Pedir estatus de un embarque (ej. SHP-1234).
+      4. "CREAR_CLIENTE": Registrar cliente. (Requiere: Nombre y Email).
+      5. "GENERAR_DOCUMENTO": Generar PDF (Factura/Cotización) de un número específico.
+      6. "GESTION_INVENTARIO": Consultar o actualizar stock (ej. cajas, corbatines).
+      7. "REPORTE_GERENCIAL": Piden métricas generales de tablas.
+      8. "INSTRUCCION_DIRECTA": Ordenan a alguien del equipo.
       
-      Debes clasificar el mensaje entrante en una de estas dos intenciones:
-      1. "REPORTE_GERENCIAL": Si piden métricas, resúmenes o datos de cotizaciones/embarques.
-      2. "INSTRUCCION_DIRECTA": Si piden ordenar a alguien del equipo hacer una tarea.
-      
-      JSON de respuesta estricto:
+      JSON ESTRICTO DE RESPUESTA:
       {
-        "intent": "REPORTE_GERENCIAL" | "INSTRUCCION_DIRECTA",
-        "query_config": {
-          "table": "quotes" | "shipments",
-          "filter_status": "ej: approved, IN_TRANSIT",
-          "limit": 3,
-          "target_name": "Nombre de a quién se le envía el reporte, si se especifica"
+        "intent": "GESTION_COTIZACION" | "APROBAR_COTIZACION" | "CONSULTA_EMBARQUE_DETALLE" | "CREAR_CLIENTE" | "GENERAR_DOCUMENTO" | "GESTION_INVENTARIO" | "REPORTE_GERENCIAL" | "INSTRUCCION_DIRECTA",
+        
+        "quote_data": { "ready": boolean, "reply_to_user": "...", "client_name": "...", "destination": "...", "pallets": 0, "price": 0 },
+        
+        "shipment_query": { "code": "Ej: SHP-1234" },
+        
+        "client_data": { "ready": boolean, "reply_to_user": "...", "name": "...", "email": "...", "phone": "...", "tax_id": "..." },
+        
+        "doc_query": { "reference_code": "Ej: Q-2024-001" },
+
+        "inventory_data": { 
+          "action": "consultar" | "actualizar",
+          "updates": [ { "item_name": "Cajas", "operation": "add" | "subtract" | "set", "amount": 100 } ]
         },
-        "tasks": [
-          {
-            "target": "Nombre de la persona a asignar",
-            "message_to_send": "Instrucción clara redactada para esa persona"
-          }
-        ]
+        
+        "query_config": { "table": "quotes" | "shipments", "filter_status": "...", "limit": 3 },
+        
+        "tasks": [ { "target": "Persona", "message_to_send": "..." } ]
       }
 
-      Mensaje: "${incomingMessage}"
+      Mensaje del Jefe: "${incomingMessage}"
     `;
 
     const result = await model.generateContent(prompt);
     const ai = JSON.parse(result.response.text());
-    console.log("🧠 Inteligencia:", JSON.stringify(ai, null, 2));
+    const baseUrl = process.env.URL || 'https://app.freshfoodpanama.com';
 
-    const [{ data: internal }, { data: external }] = await Promise.all([
-      supabase.from('profiles').select('position, phone, full_name'),
-      supabase.from('external_partners').select('position, phone, full_name')
-    ]);
-    const directory = [...(internal || []), ...(external || [])];
-
-    // --- LÓGICA DE REPORTES ---
-    if (ai.intent === "REPORTE_GERENCIAL" && ai.query_config) {
-      const { table, filter_status, limit, target_name } = ai.query_config;
-      let query = supabase.from(table || 'quotes').select('*').order('created_at', { ascending: false }).limit(limit || 3);
-      if (filter_status) query = query.ilike('status', `%${filter_status}%`);
+    // ==========================================
+    // 1. INVENTARIO (Consultas y Actualizaciones)
+    // ==========================================
+    if (ai.intent === "GESTION_INVENTARIO") {
+      const inv = ai.inventory_data;
       
-      const { data: dbRows } = await query;
-      
-      let reportBody = `📊 *REPORTE FRESH FOOD (ChatOps)*\n`;
-      if (table === 'quotes') {
-        reportBody += `_Últimas ${dbRows?.length || 0} cotizaciones:_\n\n`;
-        dbRows?.forEach(q => reportBody += `• *${q.quote_number}*: ${q.client_snapshot?.name || 'Cliente'} - *$${q.total}* (${q.status})\n`);
-      } else {
-        reportBody += `_Últimos ${dbRows?.length || 0} embarques:_\n\n`;
-        dbRows?.forEach(s => reportBody += `• *AWB ${s.awb || 'S/G'}*: ${s.pallets} pal. a ${s.destination} (${s.status})\n`);
-      }
-
-      const targetPerson = directory.find(p => p.full_name?.toLowerCase().includes(target_name?.toLowerCase() || ''));
-      const finalDest = targetPerson?.phone || senderNumber;
-      const recipientName = targetPerson?.full_name || 'Gerente / Admin';
-      
-      const success = await sendTwilioMessage(finalDest, reportBody);
-
-      // 📝 LOG DE AUDITORÍA (Reporte)
-      await supabase.from('automation_logs').insert({
-        rule_title: '🤖 ChatOps: Reporte Generado',
-        recipient_name: recipientName,
-        channel: 'WhatsApp',
-        message_text: reportBody,
-        record_type: 'Comando IA',
-        reference_number: ai.intent,
-        status: success ? 'sent' : 'failed'
-      });
-    } 
-    
-    // --- LÓGICA DE INSTRUCCIONES (ASIGNACIÓN DE TAREAS) ---
-    else if (ai.intent === "INSTRUCCION_DIRECTA" && ai.tasks) {
-      for (const task of ai.tasks) {
-        const person = directory.find(p => 
-          p.position?.toLowerCase().includes(task.target.toLowerCase()) || 
-          p.full_name?.toLowerCase().includes(task.target.toLowerCase())
-        );
-
-        if (person?.phone) {
-          const msg = `🤖 *Asignación vía ChatOps:*\n\n${task.message_to_send}`;
-          const success = await sendTwilioMessage(person.phone, msg);
-
-          // 📝 LOG DE AUDITORÍA (Instrucción)
-          await supabase.from('automation_logs').insert({
-            rule_title: '🤖 ChatOps: Instrucción Directa',
-            recipient_name: person.full_name,
-            channel: 'WhatsApp',
-            message_text: msg,
-            record_type: 'Comando IA',
-            reference_number: ai.intent,
-            status: success ? 'sent' : 'failed'
-          });
-        } else {
-          console.warn(`⚠️ ChatOps no encontró a ${task.target} en el directorio.`);
+      if (inv.action === "actualizar" && inv.updates?.length > 0) {
+        let msg = "✅ *INVENTARIO ACTUALIZADO:*\n\n";
+        for (const u of inv.updates) {
+          const { data: current } = await supabase.from('inventory').select('quantity').ilike('item_name', u.item_name).single();
+          let newQty = u.amount;
+          
+          if (current) {
+            if (u.operation === 'add') newQty = current.quantity + u.amount;
+            if (u.operation === 'subtract') newQty = current.quantity - u.amount;
+            await supabase.from('inventory').update({ quantity: newQty, last_updated: new Date().toISOString() }).ilike('item_name', u.item_name);
+          } else {
+            await supabase.from('inventory').insert({ item_name: u.item_name, quantity: newQty });
+          }
+          msg += `📦 ${u.item_name}: *${newQty} uds* \n`;
         }
+        return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>${msg}</Message></Response>` };
+      } 
+      else {
+        // Solo consultar
+        const { data: items } = await supabase.from('inventory').select('*').order('item_name');
+        let msg = "📦 *ESTADO DEL INVENTARIO:*\n\n";
+        if (!items || items.length === 0) msg += "No hay items registrados.";
+        items?.forEach(i => msg += `- *${i.item_name}*: ${i.quantity.toLocaleString()} uds.\n`);
+        return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>${msg}</Message></Response>` };
       }
     }
 
-    // Respondemos al Twilio Inbound Webhook con XML válido
-    return {
-      statusCode: 200,
-      headers: { "Content-Type": "text/xml" },
-      body: `<Response><Message>✅ Comando ChatOps ejecutado con éxito.</Message></Response>`
-    };
+    // ==========================================
+    // 2. GENERAR DOCUMENTO (Factura / Cotización)
+    // ==========================================
+    else if (ai.intent === "GENERAR_DOCUMENTO") {
+      const code = ai.doc_query?.reference_code;
+      if (!code) return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>⚠️ Por favor especifica el número de documento que deseas generar.</Message></Response>` };
+      
+      const { data: q } = await supabase.from('quotes').select('id, quote_number, status').ilike('quote_number', `%${code}%`).single();
+      
+      if (q) {
+        // Asume endpoint estándar de PDFs. Si creas uno de facturas, puedes cambiar la ruta aquí.
+        const url = `${baseUrl}/.netlify/functions/renderQuotePdf?id=${q.id}`;
+        return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>📄 *Documento Generado: ${q.quote_number}*\nEstado: ${q.status}\n\nEnlace seguro:\n${url}</Message></Response>` };
+      }
+      return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>⚠️ No encontré ningún documento con el código "${code}".</Message></Response>` };
+    }
+
+    // ==========================================
+    // 3. ESCÁNER DE EMBARQUES PROFUNDO
+    // ==========================================
+    else if (ai.intent === "CONSULTA_EMBARQUE_DETALLE" && ai.shipment_query?.code) {
+      const code = ai.shipment_query.code;
+      
+      const { data: ship, error: shipErr } = await supabase.from('shipments').select('*').ilike('code', `%${code}%`).single();
+      if (shipErr || !ship) return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>⚠️ No encontré el embarque "${code}". Verifica el número.</Message></Response>` };
+
+      // Buscar documentos reales en shipment_files
+      const { data: docs } = await supabase.from('shipment_files').select('doc_type').eq('shipment_id', ship.id);
+      
+      const requiredDocs = { 'invoice': 'Factura', 'packing_list': 'Packing List', 'awb': 'AWB / BL', 'phytosanitary': 'Fitosanitario', 'export_declaration': 'Decl. Exportación' };
+      const uploadedTypes = docs?.map(d => d.doc_type) || [];
+      const missingDocs = Object.entries(requiredDocs).filter(([key]) => !uploadedTypes.includes(key)).map(([_, label]) => label);
+
+      // Vuelos
+      let flightInfo = `Vuelo: ${ship.flight_number || 'Por asignar'}`;
+      if (ship.status === 'IN_TRANSIT' || ship.flight_departure_time) {
+        const dep = ship.flight_departure_time ? new Date(ship.flight_departure_time).toLocaleString('es-PA', {hour: '2-digit', minute:'2-digit', day:'2-digit', month:'short'}) : 'TBD';
+        const arr = ship.flight_arrival_time ? new Date(ship.flight_arrival_time).toLocaleString('es-PA', {hour: '2-digit', minute:'2-digit', day:'2-digit', month:'short'}) : 'TBD';
+        flightInfo += `\n🛫 Salida: ${dep}\n🛬 LLegada (Est): ${arr}`;
+      }
+
+      const statusEmoji = ship.status === 'DELIVERED' ? '✅' : ship.status === 'IN_TRANSIT' ? '✈️' : '⏳';
+      let reportMsg = `📦 *ESCÁNER DE EMBARQUE*\n\n*Código:* ${ship.code}\n*Destino:* ${ship.destination}\n*Estado:* ${statusEmoji} ${ship.status}\n*AWB:* ${ship.awb || 'Pendiente'}\n*Carga:* ${ship.pallets || 0} pallets (${ship.weight_kg || 0} kg)\n\n✈️ *Logística:*\n${flightInfo}\n\n📄 *Documentos:*\n`;
+      
+      if (missingDocs.length === 0) reportMsg += `✅ Expediente completo.`;
+      else reportMsg += `⚠️ *FALTAN SUBIR:*\n${missingDocs.map(d => `- ${d}`).join('\n')}`;
+
+      return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>${reportMsg}</Message></Response>` };
+    }
+
+    // ==========================================
+    // 4. CREAR CLIENTE
+    // ==========================================
+    else if (ai.intent === "CREAR_CLIENTE") {
+      const cData = ai.client_data;
+      if (!cData.ready) return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>${cData.reply_to_user}</Message></Response>` };
+
+      const { data: newClient, error: insertErr } = await supabase
+        .from('clients')
+        .insert({ name: cData.name, contact_email: cData.email, phone: cData.phone || null, tax_id: cData.tax_id || null, status: 'active' })
+        .select('id, name')
+        .single();
+
+      if (insertErr) return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>⚠️ Error DB: ${insertErr.message}</Message></Response>` };
+      return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>✅ Cliente *${newClient.name}* registrado con éxito.</Message></Response>` };
+    }
+
+    // ==========================================
+    // 5 Y 6. COTIZACIONES B2B
+    // ==========================================
+    else if (ai.intent === "GESTION_COTIZACION") {
+      const qData = ai.quote_data;
+      if (!qData.ready) return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>${qData.reply_to_user}</Message></Response>` };
+
+      const { data: newQuote, error: insertErr } = await supabase
+        .from('quotes')
+        .insert({ status: 'draft', mode: 'AIR', destination: qData.destination, pallets: qData.pallets || 0, boxes: (qData.pallets || 0) * 60, total: (qData.pallets || 0) * 60 * (qData.price || 0) })
+        .select('id, quote_number')
+        .single();
+      
+      if (insertErr) throw insertErr;
+      const pdfUrl = `${baseUrl}/.netlify/functions/renderQuotePdf?id=${newQuote.id}`;
+      return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>✅ Borrador Creado.\n\nDestino: ${qData.destination} | ${qData.pallets} pallets\nCotización: ${newQuote.quote_number}\n\nPDF: ${pdfUrl}\n\nResponde: "Aprobar cotización" para enviarla.</Message></Response>` };
+    }
+    else if (ai.intent === "APROBAR_COTIZACION") {
+      const { data: draftQuote } = await supabase.from('quotes').select('id, quote_number').eq('status', 'draft').order('created_at', { ascending: false }).limit(1).single();
+      if (draftQuote) {
+        await supabase.from('quotes').update({ status: 'sent' }).eq('id', draftQuote.id);
+        return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>🚀 ¡Listo! La cotización ${draftQuote.quote_number} ha sido ENVIADA.</Message></Response>` };
+      }
+      return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>⚠️ No encontré borradores recientes.</Message></Response>` };
+    }
+
+    // ==========================================
+    // 7 Y 8. REPORTES Y TAREAS
+    // ==========================================
+    else if (ai.intent === "REPORTE_GERENCIAL" && ai.query_config) {
+      const { table, filter_status, limit } = ai.query_config;
+      let query = supabase.from(table || 'quotes').select('*').order('created_at', { ascending: false }).limit(limit || 3);
+      if (filter_status) query = query.ilike('status', `%${filter_status}%`);
+      const { data: dbRows } = await query;
+      let reportBody = `📊 *REPORTE FRESH FOOD*\n`;
+      if (table === 'quotes') dbRows?.forEach(q => reportBody += `• *${q.quote_number}*: Destino ${q.destination} - *$${q.total}*\n`);
+      else dbRows?.forEach(s => reportBody += `• *${s.code}*: ${s.pallets} pal. a ${s.destination} (${s.status})\n`);
+      return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>${reportBody}</Message></Response>` };
+    } 
+    else if (ai.intent === "INSTRUCCION_DIRECTA" && ai.tasks) {
+      const [{ data: internal }, { data: external }] = await Promise.all([
+        supabase.from('profiles').select('position, phone, full_name'),
+        supabase.from('external_partners').select('position, phone, full_name')
+      ]);
+      const directory = [...(internal || []), ...(external || [])];
+      
+      let confirmMsg = "✅ Tareas asignadas:\n";
+      for (const task of ai.tasks) {
+        const person = directory.find(p => p.position?.toLowerCase().includes(task.target.toLowerCase()) || p.full_name?.toLowerCase().includes(task.target.toLowerCase()));
+        if (person?.phone) {
+          await sendTwilioMessage(person.phone, `🤖 *Operaciones Fresh Food:*\n\n${task.message_to_send}`);
+          confirmMsg += `- ${person.full_name} notificado.\n`;
+        } else {
+          confirmMsg += `- ⚠️ No encontré a ${task.target}.\n`;
+        }
+      }
+      return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>${confirmMsg}</Message></Response>` };
+    }
+
+    return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>✅ Comando recibido, pero no logré clasificar la acción.</Message></Response>` };
 
   } catch (error: any) {
     console.error("❌ ERROR CHATOPS:", error.message);
-    return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>⚠️ Orquestador Error: ${error.message}</Message></Response>` };
+    return { statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response><Message>⚠️ Error del Agente: ${error.message}</Message></Response>` };
   }
 };
