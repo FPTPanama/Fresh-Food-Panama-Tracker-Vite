@@ -49,7 +49,7 @@ export const handler: Handler = async (event) => {
     // 🛡️ ESCUDO DE SEGURIDAD (LISTA BLANCA)
     // ==========================================
     const AUTHORIZED_NUMBERS = [
-      "+50761234567", // <-- Reemplaza con tu número (Freddy)
+      "+50763036338", // <-- Reemplaza con tu número (Freddy)
       "+50762256452",
       "+13059248876",// <-- Reemplaza con el número de David
       // "AÑADE_MAS_NUMEROS_AQUI_ENTRE_COMILLAS"
