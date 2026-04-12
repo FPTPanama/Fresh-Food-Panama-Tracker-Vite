@@ -53,14 +53,22 @@ export const handler: Handler = async (event) => {
     const normalizedSender = senderNumber.startsWith('+') ? senderNumber : `+${senderNumber}`;
     const dbSenderFormat = `whatsapp:${normalizedSender}`;
 
-    // --- 2. ESCUDO DE SEGURIDAD RBAC ---
-    const { data: user, error: userError } = await supabase
-      .from('authorized_users')
-      .select('name, role')
-      .eq('phone_number', dbSenderFormat)
-      .single();
+    // --- 2. ESCUDO DE SEGURIDAD DIRECTO (PARCHE PARA EVITAR BLOQUEOS) ---
+    const AUTHORIZED_USERS: Record<string, { name: string, role: string }> = {
+      "+50763036338": { name: "Freddy", role: "admin" },
+      "+50762256452": { name: "David", role: "admin" },
+      "+13059248876": { name: "Victor", role: "ventas" },
+      "+50769365619": { name: "Pedro", role: "ventas" }
+    };
 
-    if (!user || userError) return quietResponse(); 
+    const user = AUTHORIZED_USERS[normalizedSender];
+
+    if (!user) {
+      console.warn(`🚨 INTRUSO BLOQUEADO O NÚMERO NO RECONOCIDO: ${normalizedSender}`);
+      return quietResponse(); // Silencio total para intrusos
+    }
+
+    console.log(`\n📩 IN: "${incomingMessage}" de ${user.name} (Rol: ${user.role})`);
 
     // --- 3. PREPARACIÓN MULTIMODAL ---
     const model = genAI.getGenerativeModel({ 
@@ -149,7 +157,10 @@ export const handler: Handler = async (event) => {
     const ai = JSON.parse(result.response.text());
     const baseUrl = process.env.URL || 'https://app.freshfoodpanama.com';
 
-    if (ai.intent === "ACCESO_DENEGADO") {
+    // ==========================================
+    // 🛡️ RECHAZOS Y CLARIFICACIONES
+    // ==========================================
+    if (ai.intent === "ACCESO_DENEGADO" || ai.intent === "CLARIFICACION") {
       await sendTwilioMessage(dbSenderFormat, ai.chat_response);
       return quietResponse();
     }
@@ -160,13 +171,11 @@ export const handler: Handler = async (event) => {
     if (ai.intent === "CREAR_CLIENTE") {
       const cData = ai.client_data;
       
-      // PASO 1: Si falta información o aún NO ha confirmado
       if (!ai.execute_action) {
         await sendTwilioMessage(dbSenderFormat, ai.chat_response);
         return quietResponse(); 
       }
       
-      // PASO 2: Confirmó. Ejecutamos la inserción real.
       const { error: clientError } = await supabase.from('clients').insert({
         name: cData.client_name, contact_name: cData.contact_name, contact_email: cData.email,
         internal_notes: `⚠️ Creado vía Atlas por ${user.name}. Pendiente completar datos.`
@@ -190,7 +199,6 @@ export const handler: Handler = async (event) => {
         return quietResponse();
       }
 
-      // Lógica de ejecución (Ejemplo de Update)
       const qData = ai.quote_data;
       if (qData.action === "update") {
         const { data: draft } = await supabase.from('quotes').select('*').eq('status', 'draft').order('created_at', { ascending: false }).limit(1).single();
@@ -206,7 +214,6 @@ export const handler: Handler = async (event) => {
         }
       }
       
-      // (Aquí irá la lógica de Create real cuando definamos los campos de quotes)
       await sendTwilioMessage(dbSenderFormat, `✅ Acción ejecutada sobre la cotización.`);
       return quietResponse();
     }
@@ -270,10 +277,9 @@ export const handler: Handler = async (event) => {
     }
 
     // ==========================================
-    // 📄 OBTENER ARCHIVO (Este no requiere confirmación, solo busca info)
+    // 📄 OBTENER ARCHIVO (CÓDIGO COMPLETO RESTAURADO)
     // ==========================================
     if (ai.intent === "OBTENER_ARCHIVO") {
-      // (Lógica de búsqueda de archivos intacta)
       const fr = ai.file_request;
       let filesFound = false;
 
@@ -290,12 +296,40 @@ export const handler: Handler = async (event) => {
             filesFound = true;
         }
       } 
-      // (Resto de la lógica de shipment_files se mantiene igual...)
+      else if (fr.resource === "shipment_file") {
+        let sQuery = supabase.from('shipments').select('id, code').order('created_at', { ascending: false });
+        if (fr.code) sQuery = sQuery.ilike('code', `%${fr.code}%`);
+        const { data: ship } = await sQuery.limit(1).maybeSingle();
+        
+        if (ship) {
+          const searchTag = fr.doc_type?.toLowerCase() || "";
+          const isMultiple = searchTag.includes('foto') || incomingMessage.toLowerCase().includes('fotos');
+
+          const { data: files } = await supabase.from('shipment_files')
+            .select('storage_path, doc_type')
+            .eq('shipment_id', ship.id)
+            .or(`doc_type.ilike.%${searchTag}%,filename.ilike.%${searchTag}%`)
+            .limit(isMultiple ? 5 : 1);
+
+          if (files && files.length > 0) {
+            for (const f of files) {
+              const bucket = f.doc_type.toLowerCase().includes('foto') ? 'shipment-photos' : 'shipment-docs';
+              const cleanPath = f.storage_path.replace(`${bucket}/`, '');
+              const { data: signed } = await supabase.storage.from(bucket).createSignedUrl(cleanPath, 3600);
+              if (signed?.signedUrl) {
+                await sendTwilioMessage(dbSenderFormat, `📦 ${f.doc_type.toUpperCase()} (${ship.code})`, signed.signedUrl);
+                filesFound = true;
+              }
+            }
+          }
+        }
+      }
       
       if (!filesFound) await sendTwilioMessage(dbSenderFormat, `⚠️ No encontré el archivo solicitado.`);
       return quietResponse();
     }
-// ==========================================
+
+    // ==========================================
     // 📞 CONSULTA CRM (Súper Memoria de Clientes)
     // ==========================================
     if (ai.intent === "CONSULTA_CRM") {
@@ -310,7 +344,6 @@ export const handler: Handler = async (event) => {
           const c = clients[0];
           const info = `🏢 *${c.name}*\n👤 Contacto: ${c.contact_name || 'N/A'}\n📧 Email: ${c.contact_email}\n📞 Teléfono: ${c.phone || 'No registrado'}\n📍 País: ${c.country || 'No registrado'}\n📝 Notas: ${c.internal_notes || 'Ninguna'}`;
           
-          // Re-inyectamos esta info a Gemini para que te responda como un experto
           const crmPrompt = `El usuario preguntó por ${target}. La base de datos arrojó esto: ${info}. Dale la información de forma ejecutiva como su COO.`;
           const finalCrmResponse = await model.generateContent(crmPrompt);
           await sendTwilioMessage(dbSenderFormat, finalCrmResponse.response.text());
@@ -326,7 +359,6 @@ export const handler: Handler = async (event) => {
     // 🔎 INVESTIGAR LEAD EXTERNO (Análisis de Mercado)
     // ==========================================
     if (ai.intent === "INVESTIGAR_LEAD") {
-      // Usamos el conocimiento interno masivo de Gemini 3.1 Flash para investigar
       const leadPrompt = `Actúa como COO de Fresh Food Panamá. El Jefe Supremo (Freddy) quiere que investigues a la empresa o mercado: "${incomingMessage}". 
       Proporciona un análisis ejecutivo B2B: ¿Qué hacen? ¿Son relevantes para agro-exportación? ¿Qué riesgos o perfil tienen? Si no tienes datos exactos, dale un análisis del mercado de ese país para exportar fruta fresca.`;
       
