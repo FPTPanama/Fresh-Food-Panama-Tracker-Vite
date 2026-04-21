@@ -4,7 +4,7 @@ import {
   Save, FileText, Loader2, Plane, Ship, 
   Thermometer, Droplets, Calculator, MapPin, Shield, ArrowRight,
   Maximize, AlertCircle, TrendingDown, ChevronLeft, ChevronRight,
-  Calendar, MessageSquare, Clock, CreditCard, CalendarClock
+  Calendar, MessageSquare, Clock, CreditCard, CalendarClock, Plus, X
 } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
 import { getApiBase } from "../../../lib/apiBase";
@@ -16,7 +16,6 @@ import { LocationSelector } from "../../../components/LocationSelector";
 const GLOBAL_MARGIN_THRESHOLD = 10.0; 
 const LOGS_PER_PAGE = 5; 
 
-// FIX: Diccionario expandido con TODOS los campos posibles de la cotización
 const FIELD_LABELS: { [key: string]: string } = {
   boxes: "Cajas", weight_kg: "Peso (Kg)", origin: "Origen", destination: "Destino",
   status: "Estado", total: "Venta Total", mode: "Vía de Transporte", terms: "Términos y Condiciones",
@@ -30,7 +29,6 @@ const FIELD_LABELS: { [key: string]: string } = {
   c_other: "Otros Costos", s_other: "Otras Ventas", costs: "Costos/Precios", totals: "Totales"
 };
 
-// Función robusta para formatear valores en el historial
 const formatChangeVal = (val: any, isDocs: boolean = false) => {
   if (isDocs) return "Documento Modificado";
   if (val === null || val === undefined || val === '') return "Vacío";
@@ -48,17 +46,23 @@ const statusBadgeClass = (status: string | undefined) => {
     case 'approved': return base + "green";
     case 'rejected': return base + "red";
     case 'expired': return base + "orange";
-    case 'archived': return base + "gray"; // Añadido soporte visual para archivado
+    case 'archived': return base + "gray"; 
     default: return base + "gray";
   }
 };
 
 const DEFAULT_TERMS = `• Validez de la oferta: 5 días hábiles.\n• Precios basados en el Incoterm seleccionado.\n• Sujeto a disponibilidad de espacio en aerolínea/naviera.\n• Incluye inspección fitosanitaria y pre-enfriamiento.`;
 
-interface CostLine { base: number; unitSale: number; label: string; tip: string; }
+// --- ESTRUCTURA PRO PARA MATRIZ DINÁMICA ---
+interface CostLine { 
+  base: number; 
+  unitSale: number; 
+  label: string; 
+  tip: string; 
+  qtyType: 'boxes' | 'weight' | 'fixed'; 
+}
 interface CostState { [key: string]: CostLine; }
 
-// --- HELPER TOOLTIP DE LOCACIÓN ---
 const LocationTooltip = ({ code, locMap, children }: { code: string, locMap: Record<string, any>, children: React.ReactNode }) => {
   const locInfo = locMap[code?.toUpperCase()];
   const displayName = locInfo ? `${locInfo.name}${locInfo.country ? `, ${locInfo.country}` : ''}` : 'Locación Desconocida';
@@ -111,21 +115,21 @@ export default function AdminQuoteDetailPage() {
   const [shipmentDate, setShipmentDate] = useState(""); 
   const [termsConditions, setTermsConditions] = useState(DEFAULT_TERMS);
 
-  // NUEVOS ESTADOS DE NEGOCIO
   const [paymentTerms, setPaymentTerms] = useState("A convenir entre las partes");
   const [validUntil, setValidUntil] = useState("");
 
   const isReadOnly = useMemo(() => status?.toLowerCase() === 'approved', [status]);
 
+  // ESTADO DINÁMICO DE COSTOS
   const [costs, setCosts] = useState<CostState>({
-    fruta: { base: 13.30, unitSale: 0, label: "Fruta (Base Cajas)", tip: "Precio de compra por caja." },
-    flete: { base: 0, unitSale: 0, label: "Flete Internacional", tip: "Costo por Kg estimado." },
-    origen: { base: 0, unitSale: 0, label: "Gastos de Origen", tip: "Transporte interno y manejo." },
-    aduana: { base: 0, unitSale: 0, label: "Gestión Aduanera", tip: "Corredor y trámites." },
-    inspeccion: { base: 0, unitSale: 0, label: "Inspecciones / Fiton", tip: "Costo fijo MIDA." },
-    itbms: { base: 0, unitSale: 0, label: "ITBMS / Tasas", tip: "Impuestos aplicables." },
-    handling: { base: 0, unitSale: 0, label: "Handling", tip: "Manejo de carga." },
-    otros: { base: 0, unitSale: 0, label: "Otros Gastos", tip: "Gastos no previstos." }
+    fruta: { base: 13.30, unitSale: 0, label: "Fruta (Base Cajas)", tip: "Precio de compra por caja.", qtyType: 'boxes' },
+    flete: { base: 0, unitSale: 0, label: "Flete Internacional", tip: "Costo por Kg estimado.", qtyType: 'weight' },
+    origen: { base: 0, unitSale: 0, label: "Gastos de Origen", tip: "Transporte interno y manejo.", qtyType: 'fixed' },
+    aduana: { base: 0, unitSale: 0, label: "Gestión Aduanera", tip: "Corredor y trámites.", qtyType: 'fixed' },
+    inspeccion: { base: 0, unitSale: 0, label: "Inspecciones / Fiton", tip: "Costo fijo MIDA.", qtyType: 'fixed' },
+    itbms: { base: 0, unitSale: 0, label: "ITBMS / Tasas", tip: "Impuestos aplicables.", qtyType: 'fixed' },
+    handling: { base: 0, unitSale: 0, label: "Handling", tip: "Manejo de carga.", qtyType: 'fixed' },
+    otros: { base: 0, unitSale: 0, label: "Otros Gastos Fijos", tip: "Gastos no previstos.", qtyType: 'fixed' }
   });
 
   const headerInfo = useMemo(() => {
@@ -140,11 +144,13 @@ export default function AdminQuoteDetailPage() {
   const analysis = useMemo(() => {
     const lines = Object.entries(costs).map(([key, val]) => {
       let qty = 1;
-      if (key === 'fruta') qty = boxes;
-      if (key === 'flete') qty = weightKg;
+      if (val.qtyType === 'boxes') qty = boxes;
+      if (val.qtyType === 'weight') qty = weightKg;
+      
       const baseTotalCost = (val.base || 0) * qty;
       const totalSaleRow = (val.unitSale || 0) * qty;
       const currentMarginNum = totalSaleRow > 0 ? (1 - (baseTotalCost / totalSaleRow)) * 100 : 0;
+      
       return { key, ...val, qty, baseTotalCost, totalSaleRow, margin: currentMarginNum.toFixed(2) };
     });
 
@@ -189,20 +195,8 @@ export default function AdminQuoteDetailPage() {
 
   const loadChatAndClearNotify = useCallback(async () => {
     if (!id) return;
-    
-    await supabase
-      .from('quote_activity')
-      .update({ is_read: true })
-      .eq('quote_id', id)
-      .eq('is_read', false)
-      .eq('sender_role', 'client');
-
-    const { data: chatData } = await supabase
-      .from('quote_activity')
-      .select('*')
-      .eq('quote_id', id)
-      .order('created_at', { ascending: true });
-
+    await supabase.from('quote_activity').update({ is_read: true }).eq('quote_id', id).eq('is_read', false).eq('sender_role', 'client');
+    const { data: chatData } = await supabase.from('quote_activity').select('*').eq('quote_id', id).order('created_at', { ascending: true });
     if (chatData) setMessages(chatData);
   }, [id]);
 
@@ -227,8 +221,6 @@ export default function AdminQuoteDetailPage() {
         setPlace(q.destination || "");
         setProductId(q.product_id || "");
         setTermsConditions(q.terms || DEFAULT_TERMS);
-        
-        // Cargar nuevos valores comerciales
         setPaymentTerms(q.payment_terms || "A convenir entre las partes");
         setValidUntil(q.valid_until || ""); 
 
@@ -245,16 +237,30 @@ export default function AdminQuoteDetailPage() {
         }
 
         const c = q.costs || {};
-        setCosts({
-          fruta: { base: Number(c.c_fruit || 13.30), unitSale: Number(c.s_fruit || 0), label: "Fruta (Base Cajas)", tip: "Precio de compra por caja." },
-          flete: { base: Number(c.c_freight || 0), unitSale: Number(c.s_freight || 0), label: "Flete Internacional", tip: "Costo por Kg estimado." },
-          origen: { base: Number(c.c_origin || 0), unitSale: Number(c.s_origin || 0), label: "Gastos de Origen", tip: "Transporte interno y manejo." },
-          aduana: { base: Number(c.c_aduana || 0), unitSale: Number(c.s_aduana || 0), label: "Gestión Aduanera", tip: "Corredor y trámites." },
-          inspeccion: { base: Number(c.c_insp || 0), unitSale: Number(c.s_insp || 0), label: "Inspecciones / Fiton", tip: "Costo fijo MIDA." },
-          itbms: { base: Number(c.c_itbms || 0), unitSale: Number(c.s_itbms || 0), label: "ITBMS / Tasas", tip: "Impuestos aplicables." },
-          handling: { base: Number(c.c_handling || 0), unitSale: Number(c.s_handling || 0), label: "Handling", tip: "Manejo de carga." },
-          otros: { base: Number(c.c_other || 0), unitSale: Number(c.s_other || 0), label: "Otros Gastos", tip: "Gastos no previstos." }
-        });
+        const loadedCosts: CostState = {
+          fruta: { base: Number(c.c_fruit || 13.30), unitSale: Number(c.s_fruit || 0), label: "Fruta (Base Cajas)", tip: "Precio de compra por caja.", qtyType: 'boxes' },
+          flete: { base: Number(c.c_freight || 0), unitSale: Number(c.s_freight || 0), label: "Flete Internacional", tip: "Costo por Kg estimado.", qtyType: 'weight' },
+          origen: { base: Number(c.c_origin || 0), unitSale: Number(c.s_origin || 0), label: "Gastos de Origen", tip: "Transporte interno y manejo.", qtyType: 'fixed' },
+          aduana: { base: Number(c.c_aduana || 0), unitSale: Number(c.s_aduana || 0), label: "Gestión Aduanera", tip: "Corredor y trámites.", qtyType: 'fixed' },
+          inspeccion: { base: Number(c.c_insp || 0), unitSale: Number(c.s_insp || 0), label: "Inspecciones / Fiton", tip: "Costo fijo MIDA.", qtyType: 'fixed' },
+          itbms: { base: Number(c.c_itbms || 0), unitSale: Number(c.s_itbms || 0), label: "ITBMS / Tasas", tip: "Impuestos aplicables.", qtyType: 'fixed' },
+          handling: { base: Number(c.c_handling || 0), unitSale: Number(c.s_handling || 0), label: "Handling", tip: "Manejo de carga.", qtyType: 'fixed' },
+          otros: { base: Number(c.c_other || 0), unitSale: Number(c.s_other || 0), label: "Otros Gastos Fijos", tip: "Gastos no previstos.", qtyType: 'fixed' }
+        };
+
+        // Cargar líneas dinámicas
+        if (c.custom_lines && Array.isArray(c.custom_lines)) {
+          c.custom_lines.forEach((cl: any) => {
+            loadedCosts[cl.id] = {
+              base: Number(cl.base || 0),
+              unitSale: Number(cl.unitSale || 0),
+              label: cl.label || "Línea Adicional",
+              tip: "Recargo/Producto Extra",
+              qtyType: cl.qtyType || 'fixed'
+            };
+          });
+        }
+        setCosts(loadedCosts);
 
         const m = q.totals?.meta || {};
         setIncoterm(m.incoterm || "CIP");
@@ -276,7 +282,6 @@ export default function AdminQuoteDetailPage() {
     if (authOk && id) loadData();
   }, [authOk, id, loadData]);
 
-  // Función de autocompletado +5 Días
   const handleSet5Days = () => {
     if (isReadOnly) return;
     const baseDate = data?.created_at ? new Date(data.created_at) : new Date();
@@ -284,10 +289,33 @@ export default function AdminQuoteDetailPage() {
     setValidUntil(baseDate.toISOString().split('T')[0]);
   };
 
-  const updateCostLine = (key: string, field: 'base' | 'unitSale', value: string) => {
+  // --- MÉTODOS PARA LÍNEAS DINÁMICAS ---
+  const handleAddCustomLine = () => {
     if (isReadOnly) return;
-    const numValue = value === "" ? 0 : parseFloat(value);
-    setCosts((prev) => ({ ...prev, [key]: { ...prev[key], [field]: numValue } }));
+    const newId = `custom_${Date.now()}`;
+    setCosts(prev => ({
+      ...prev,
+      [newId]: { base: 0, unitSale: 0, label: "Nuevo Cargo / Producto", tip: "Editado por Administrador", qtyType: 'fixed' }
+    }));
+  };
+
+  const updateCostLine = (key: string, field: 'base' | 'unitSale' | 'label' | 'qtyType', value: string) => {
+    if (isReadOnly) return;
+    setCosts((prev) => {
+      const current = prev[key];
+      let finalValue: string | number = value;
+      if (field === 'base' || field === 'unitSale') finalValue = value === "" ? 0 : parseFloat(value);
+      return { ...prev, [key]: { ...current, [field]: finalValue } };
+    });
+  };
+
+  const removeCustomLine = (key: string) => {
+    if (isReadOnly) return;
+    setCosts(prev => {
+      const copy = { ...prev };
+      delete copy[key];
+      return copy;
+    });
   };
 
   const handleSendMessage = async () => {
@@ -296,29 +324,14 @@ export default function AdminQuoteDetailPage() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const user = session?.user;
-
-      if (!user) {
-        setToast("Error: Sesión expirada");
-        return;
-      }
+      if (!user) { setToast("Error: Sesión expirada"); return; }
 
       const { error } = await supabase.from('quote_activity').insert({
-        quote_id: id,
-        sender_id: user.id,
-        sender_role: 'admin',
-        message: newMessage.trim(),
-        is_read: true 
+        quote_id: id, sender_id: user.id, sender_role: 'admin', message: newMessage.trim(), is_read: true 
       });
 
-      if (!error) {
-        setNewMessage("");
-        loadChatAndClearNotify();
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSendingMsg(false);
-    }
+      if (!error) { setNewMessage(""); loadChatAndClearNotify(); }
+    } catch (err) { console.error(err); } finally { setSendingMsg(false); }
   };
 
   async function handleSave() {
@@ -329,18 +342,16 @@ export default function AdminQuoteDetailPage() {
     setBusy(true);
     try {
       const totalVentaCientifico = analysis.lines.reduce((acc, curr) => acc + curr.totalSaleRow, 0);
+      
+      const customKeys = Object.keys(costs).filter(k => k.startsWith('custom_'));
+      const customLinesPayload = customKeys.map(k => ({
+        id: k, label: costs[k].label, base: costs[k].base, unitSale: costs[k].unitSale, qtyType: costs[k].qtyType
+      }));
+
       const payload = {
-        id,
-        total: totalVentaCientifico, 
-        status, 
-        mode, 
-        origin, 
-        destination: place,
-        boxes: Number(boxes), 
-        weight_kg: Number(weightKg),
-        terms: termsConditions,
-        payment_terms: paymentTerms, // Se guardan términos de pago
-        valid_until: validUntil || null, // Se guarda validez
+        id, total: totalVentaCientifico, status, mode, origin, destination: place,
+        boxes: Number(boxes), weight_kg: Number(weightKg), terms: termsConditions,
+        payment_terms: paymentTerms, valid_until: validUntil || null,
         costs: {
           c_fruit: Number(costs.fruta.base), s_fruit: Number(costs.fruta.unitSale),
           c_freight: Number(costs.flete.base), s_freight: Number(costs.flete.unitSale),
@@ -349,18 +360,19 @@ export default function AdminQuoteDetailPage() {
           c_insp: Number(costs.inspeccion.base), s_insp: Number(costs.inspeccion.unitSale),
           c_itbms: Number(costs.itbms.base), s_itbms: Number(costs.itbms.unitSale),
           c_handling: Number(costs.handling.base), s_handling: Number(costs.handling.unitSale),
-          c_other: Number(costs.otros.base), s_other: Number(costs.otros.unitSale)
+          c_other: Number(costs.otros.base), s_other: Number(costs.otros.unitSale),
+          custom_lines: customLinesPayload // <-- Guardado seguro
         },
         totals: {
           total: totalVentaCientifico,
-          items: analysis.lines.map(l => ({ name: l.label, total: l.unitSale })).filter(it => it.total > 0),
+          // Se incluye qty y totalRow en el JSON para que el generador de PDF pueda leer el cálculo exacto
+          items: analysis.lines.map(l => ({ 
+            name: l.label, total: l.unitSale, unit: l.unitSale, qty: l.qty, totalRow: l.totalSaleRow 
+          })).filter(it => it.totalRow > 0),
           meta: { incoterm, place, pallets: Number(pallets) }
         },
         product_id: productId || null,
-        product_details: { 
-          variety, color, brix, caliber,
-          requested_shipment_date: shipmentDate 
-        }
+        product_details: { variety, color, brix, caliber, requested_shipment_date: shipmentDate }
       };
 
       const { data: { session } } = await supabase.auth.getSession();
@@ -373,35 +385,17 @@ export default function AdminQuoteDetailPage() {
       if (!response.ok) throw new Error("Error Servidor");
 
       if (status.toLowerCase() === 'approved') {
-        const { data: existingShip } = await supabase
-          .from('shipments')
-          .select('id')
-          .eq('quote_id', id)
-          .maybeSingle();
-
+        const { data: existingShip } = await supabase.from('shipments').select('id').eq('quote_id', id).maybeSingle();
         if (!existingShip) {
           const selectedProd = products.find(p => p.id === productId);
-          const { error: shipError } = await supabase
-            .from('shipments')
-            .insert({
-              quote_id: id,
-              client_id: data.client_id || data.clients?.id,
-              boxes: Number(boxes),
-              pallets: Number(pallets),
-              weight_kg: Number(weightKg),
-              product_name: selectedProd?.name || "Fruta",
-              product_variety: variety,
-              product_mode: mode,
-              caliber: caliber,
-              color: color,
-              brix_grade: brix,
-              origin: origin, 
-              destination: place,
-              incoterm: incoterm,
-              status: 'CREATED',
+          const { error: shipError } = await supabase.from('shipments').insert({
+              quote_id: id, client_id: data.client_id || data.clients?.id,
+              boxes: Number(boxes), pallets: Number(pallets), weight_kg: Number(weightKg),
+              product_name: selectedProd?.name || "Fruta", product_variety: variety, product_mode: mode,
+              caliber: caliber, color: color, brix_grade: brix, origin: origin, destination: place,
+              incoterm: incoterm, status: 'CREATED',
               code: `SHP-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`
             });
-          
           if (shipError) console.error("Error al crear embarque:", shipError);
           else setToast("Aprobada y Embarque Generado");
         }
@@ -455,7 +449,7 @@ export default function AdminQuoteDetailPage() {
             <div className="head-actions">
               <div className="kpi-box">
                 <span className={`kpi-val ${analysis.isRisk ? 'txt-danger' : ''}`}>USD {analysis.perBox.toFixed(2)}</span>
-                <span className="kpi-lab">PRECIO POR CAJA</span>
+                <span className="kpi-lab">PRECIO/CAJA TOTAL</span>
               </div>
               <button onClick={handlePrintPdf} className="pdf-link"><FileText size={18}/> PDF</button>
               <button className={`btn-save ${analysis.isRisk ? 'btn-danger' : ''}`} onClick={handleSave} disabled={busy || (isReadOnly && data?.status === 'approved')}>
@@ -492,7 +486,7 @@ export default function AdminQuoteDetailPage() {
           </div>
         </div>
 
-        {/* --- CONDICIONES COMERCIALES (NUEVO) --- */}
+        {/* --- CONDICIONES COMERCIALES --- */}
         <div className="ff-card strip border-blue">
           <div className="strip-label" style={{ color: '#1d4ed8' }}>COMERCIAL</div>
           <div className="strip-grid">
@@ -562,7 +556,7 @@ export default function AdminQuoteDetailPage() {
               }
             </div>
             
-            <div className="f" style={{ flex: "0 0 110px" }} title="Fecha estimada de embarque (Estimated Time of Departure)">
+            <div className="f" style={{ flex: "0 0 110px" }}>
               <label className="ff-help-cursor"><Calendar size={10} /> ETD</label>
               <input disabled={isReadOnly} type="date" value={shipmentDate} onChange={e => setShipmentDate(e.target.value)} className="ff-input-compact no-spin" />
             </div>
@@ -581,31 +575,75 @@ export default function AdminQuoteDetailPage() {
           </div>
         </div>
 
-        {/* --- ANÁLISIS --- */}
+        {/* --- ANÁLISIS COMERCIAL (NUEVO MOTOR DINÁMICO) --- */}
         <div className="ff-card">
-          <div className="table-h"><Calculator size={18} color="#16a34a"/> <span>Matriz Comercial</span></div>
+          <div className="table-h" style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Calculator size={18} color="#16a34a"/> <span>Matriz Comercial Interactiva</span>
+            </div>
+            <button onClick={handleAddCustomLine} disabled={isReadOnly} className="btn-add-line">
+              <Plus size={14} /> Añadir Recargo / Producto
+            </button>
+          </div>
           <table className="a-table">
-            <thead><tr><th align="left">CONCEPTO</th><th align="right">COSTO UNIT.</th><th align="center">CANT.</th><th align="right">P. UNIT. VENTA</th><th align="right">VENTA TOTAL</th><th align="center">MARGEN %</th></tr></thead>
+            <thead>
+              <tr>
+                <th align="left">CONCEPTO / SERVICIO</th>
+                <th align="center" style={{width: '100px'}}>MULTIPLICADOR</th>
+                <th align="right">COSTO UNIT.</th>
+                <th align="center">CANT.</th>
+                <th align="right">P. UNIT. VENTA</th>
+                <th align="right">VENTA TOTAL</th>
+                <th align="center">MARGEN %</th>
+              </tr>
+            </thead>
             <tbody>
-              {analysis.lines.map(l => (
-                <tr key={l.key}>
-                  <td><div className="c-box"><b>{l.label}</b><span>{l.tip}</span></div></td>
-                  <td align="right"><input disabled={isReadOnly} className="in no-spin" type="number" step="any" value={costs[l.key].base || ""} onChange={e => updateCostLine(l.key, 'base', e.target.value)} /></td>
-                  <td align="center" style={{fontWeight: 800, color: '#64748b'}}>{l.qty}</td>
-                  <td align="right"><input disabled={isReadOnly} className="in s no-spin" type="number" step="any" value={costs[l.key].unitSale || ""} onChange={e => updateCostLine(l.key, 'unitSale', e.target.value)} /></td>
-                  <td align="right" style={{fontWeight: 700}}>${l.totalSaleRow.toLocaleString(undefined, {minimumFractionDigits:2})}</td>
-                  <td align="center"><span className="m-badge">{l.margin}%</span></td>
-                </tr>
-              ))}
+              {analysis.lines.map(l => {
+                const isCustom = l.key.startsWith('custom_');
+                return (
+                  <tr key={l.key} className={isCustom ? 'custom-row-hl' : ''}>
+                    <td>
+                      <div className="c-box" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        {isCustom && !isReadOnly && (
+                          <button onClick={() => removeCustomLine(l.key)} className="btn-del-line" title="Eliminar Línea"><X size={12}/></button>
+                        )}
+                        {isCustom ? (
+                          <input disabled={isReadOnly} className="in-label" value={costs[l.key].label} onChange={e => updateCostLine(l.key, 'label', e.target.value)} placeholder="Nombre del Cargo" />
+                        ) : (
+                          <div><b>{l.label}</b><span>{l.tip}</span></div>
+                        )}
+                      </div>
+                    </td>
+                    
+                    <td align="center">
+                      {isCustom ? (
+                        <select disabled={isReadOnly} className="in-qty" value={costs[l.key].qtyType} onChange={e => updateCostLine(l.key, 'qtyType', e.target.value as any)}>
+                          <option value="fixed">Monto Fijo</option>
+                          <option value="weight">Por Kg</option>
+                          <option value="boxes">Por Caja</option>
+                        </select>
+                      ) : (
+                        <span className="qty-badge">{l.qtyType === 'weight' ? 'Por Kg' : l.qtyType === 'boxes' ? 'Por Caja' : 'Fijo'}</span>
+                      )}
+                    </td>
+
+                    <td align="right"><input disabled={isReadOnly} className="in no-spin" type="number" step="any" value={costs[l.key].base || ""} onChange={e => updateCostLine(l.key, 'base', e.target.value)} /></td>
+                    <td align="center" style={{fontWeight: 800, color: '#64748b'}}>{l.qty}</td>
+                    <td align="right"><input disabled={isReadOnly} className="in s no-spin" type="number" step="any" value={costs[l.key].unitSale || ""} onChange={e => updateCostLine(l.key, 'unitSale', e.target.value)} /></td>
+                    <td align="right" style={{fontWeight: 700}}>${l.totalSaleRow.toLocaleString(undefined, {minimumFractionDigits:2})}</td>
+                    <td align="center"><span className="m-badge">{l.margin}%</span></td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           <div className="a-footer">
-            <div className="stat">INVERSIÓN <b>${analysis.totalCost.toLocaleString(undefined, {minimumFractionDigits:2})}</b></div>
-            <div className="stat">VENTA BRUTA <b className="g">${analysis.totalSale.toLocaleString(undefined, {minimumFractionDigits:2})}</b></div>
-            <div className="stat">UTILIDAD <b className="b">${analysis.profit.toLocaleString(undefined, {minimumFractionDigits:2})}</b></div>
+            <div className="stat">INVERSIÓN TOTAL <b>${analysis.totalCost.toLocaleString(undefined, {minimumFractionDigits:2})}</b></div>
+            <div className="stat">VENTA BRUTA TOTAL <b className="g">${analysis.totalSale.toLocaleString(undefined, {minimumFractionDigits:2})}</b></div>
+            <div className="stat">UTILIDAD NETA <b className="b">${analysis.profit.toLocaleString(undefined, {minimumFractionDigits:2})}</b></div>
             <div className={`stat featured ${analysis.isRisk ? 'stat-danger' : ''}`}>
-               PRECIO/CAJA <b>USD {analysis.perBox.toFixed(2)}</b>
-               <div className="stat-sub">M. Global: {analysis.globalMargin.toFixed(2)}%</div>
+               MARGEN GLOBAL <b>{analysis.globalMargin.toFixed(2)}%</b>
+               <div className="stat-sub">Venta - Inversión / Venta</div>
             </div>
           </div>
         </div>
@@ -752,7 +790,7 @@ export default function AdminQuoteDetailPage() {
         
         .ff-help-cursor { cursor: help; text-decoration: underline dotted #94a3b8; }
 
-        /* INPUTS COMPACTOS (De 38px a 34px) */
+        /* INPUTS COMPACTOS */
         .f input, .f select, .toggle { height: 34px; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0 8px; font-size: 12px; font-weight: 600; outline: none; width: 100%; background: white; }
         .tooltip-trigger-input { cursor: help !important; }
         .toggle.readonly { opacity: 0.7; cursor: not-allowed; pointer-events: none; }
@@ -780,6 +818,19 @@ export default function AdminQuoteDetailPage() {
         .loc-tooltip strong { font-size: 12px; font-weight: 800; color: #34d399; letter-spacing: 0.5px; }
 
         .table-h { display: flex; align-items: center; gap: 8px; margin-bottom: 15px; font-weight: 800; text-transform: uppercase; font-size: 11px; }
+        
+        /* BOTONES NUEVOS DE MATRIZ DINÁMICA */
+        .btn-add-line { background: #eff6ff; color: #2563eb; border: 1px dashed #bfdbfe; padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; gap: 6px; align-items: center; transition: 0.2s; }
+        .btn-add-line:hover:not(:disabled) { background: #dbeafe; border-color: #60a5fa; }
+        .btn-del-line { background: #fee2e2; color: #ef4444; border: none; border-radius: 6px; width: 24px; height: 24px; display: flex; justify-content: center; align-items: center; cursor: pointer; transition: 0.2s; }
+        .btn-del-line:hover { background: #ef4444; color: white; }
+        
+        .custom-row-hl { background: #f8fafc; }
+        .in-label { font-size: 12px; font-weight: 700; padding: 6px; border: 1px dashed #cbd5e1; border-radius: 6px; width: 100%; outline: none; background: white; }
+        .in-label:focus { border-color: #3b82f6; border-style: solid; }
+        .in-qty { font-size: 11px; font-weight: 700; padding: 4px; border: 1px solid #cbd5e1; border-radius: 6px; width: 100%; background: white; color: #475569; }
+        .qty-badge { font-size: 10px; font-weight: 700; background: #e2e8f0; color: #475569; padding: 4px 8px; border-radius: 6px; }
+
         .a-table { width: 100%; border-collapse: collapse; }
         .a-table th { font-size: 10px; color: #94a3b8; padding: 8px; border-bottom: 2px solid #f8fafc; text-align: left; }
         .a-table td { padding: 10px 8px; border-bottom: 1px solid #f8fafc; }

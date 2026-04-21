@@ -1,4 +1,3 @@
-// netlify/functions/updateQuote.ts
 import type { Handler } from "@netlify/functions";
 import { sbAdmin, getUserAndProfile, json, text, isPrivilegedRole, optionsResponse } from "./_util";
 
@@ -48,6 +47,28 @@ async function getNextShipmentNumber(year: number) {
   return `${prefix}${String(next).padStart(4, "0")}`;
 }
 
+// 🚀 NUEVA FUNCIÓN: Generador correlativo de Facturas
+async function getNextInvoiceNumber(year: number) {
+  const prefix = `INV-${year}-`;
+  const { data, error } = await sbAdmin
+    .from("invoices")
+    .select("invoice_number")
+    .ilike("invoice_number", `${prefix}%`)
+    .order("invoice_number", { ascending: false })
+    .limit(1);
+
+  if (error || !data?.[0]?.invoice_number) {
+    return `${prefix}0001`;
+  }
+
+  const last = String(data[0].invoice_number).trim();
+  const tail = last.slice(prefix.length);
+  const lastN = Number(tail);
+  const next = Number.isFinite(lastN) ? lastN + 1 : 1;
+  
+  return `${prefix}${String(next).padStart(4, "0")}`;
+}
+
 export const handler: Handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return optionsResponse();
   if (event.httpMethod !== "POST") return text(405, "Method not allowed");
@@ -56,16 +77,15 @@ export const handler: Handler = async (event) => {
     const { user, profile } = await getUserAndProfile(event);
     
     if (!user || !profile) return text(401, "Unauthorized");
-    // Eliminamos restricción temporalmente para debug, o aseguramos que el cliente SÍ pueda aceptar su propia quote
-    // if (!isPrivilegedRole(profile.role || "")) return text(403, "Forbidden");
 
     const body = JSON.parse(event.body || "{}");
     const id = String(body.id || "").trim();
     if (!id) return text(400, "Missing id");
 
+    // Agregamos campos extra al select para asegurar que la factura herede todo si viene vacío en el patch
     const { data: currentQuote, error: fetchError } = await sbAdmin
       .from("quotes")
-      .select("status, quote_number, product_id, client_id, origin") 
+      .select("status, quote_number, product_id, client_id, origin, boxes, weight_kg, totals, terms, valid_until") 
       .eq("id", id)
       .single();
 
@@ -89,7 +109,6 @@ export const handler: Handler = async (event) => {
 
     const oldStatus = String(currentQuote.status).toLowerCase();
     
-    // 🚨 SOPORTE PARA AMBOS STATUS: A veces el frontend manda "accepted", el backend original esperaba "approved"
     let newStatusRaw = String(patch.status || currentQuote.status).toLowerCase();
     if (newStatusRaw === 'accepted') newStatusRaw = 'approved'; 
     const newStatus = newStatusRaw;
@@ -118,43 +137,38 @@ export const handler: Handler = async (event) => {
       return text(500, updateError.message);
     }
 
-    // 🚨 EL CEREBRO DE LA AUTOMATIZACIÓN 🚨
+    // 🚨 EL CEREBRO DE LA AUTOMATIZACIÓN DUAL (EMBARQUE + FACTURA) 🚨
     console.log(`Verificando automatización... Status: ${newStatus}`);
+    
     if (newStatus === 'approved') {
-      const { data: existingShip } = await sbAdmin
-        .from('shipments')
-        .select('id')
-        .eq('quote_id', id)
-        .maybeSingle();
+      const year = new Date().getFullYear();
+
+      // ==========================================
+      // 1. AUTOMATIZACIÓN DE EMBARQUE OPERATIVO
+      // ==========================================
+      const { data: existingShip } = await sbAdmin.from('shipments').select('id').eq('quote_id', id).maybeSingle();
 
       if (!existingShip) {
         console.log(`Generando embarque automático para quote: ${id}`);
-        const year = new Date().getFullYear();
         const shipmentCode = await getNextShipmentNumber(year);
 
         let prodName = "Fruta";
         let variety = patch.product_details?.variety || "";
         
         if (patch.product_id || currentQuote.product_id) {
-          const { data: p } = await sbAdmin
-            .from('products')
-            .select('name')
-            .eq('id', patch.product_id || currentQuote.product_id)
-            .single();
+          const { data: p } = await sbAdmin.from('products').select('name').eq('id', patch.product_id || currentQuote.product_id).single();
           if (p) prodName = p.name;
         }
 
-        // Blindaje contra errores de DB (nulos o undefined que rompen constraints)
-        const payload = {
+        const shipPayload = {
             quote_id: id,
             client_id: patch.client_id || currentQuote.client_id,
-            boxes: Number(patch.boxes || 0),
-            pallets: Number(patch.totals?.meta?.pallets || 0),
-            weight_kg: Number(patch.weight_kg || 0),
+            boxes: Number(patch.boxes || currentQuote.boxes || 0),
+            pallets: Number(patch.totals?.meta?.pallets || currentQuote.totals?.meta?.pallets || 0),
+            weight_kg: Number(patch.weight_kg || currentQuote.weight_kg || 0),
             product_name: prodName,
             product_variety: variety,
             product_mode: patch.mode || "AIR",
-            // Ajustamos a 'calibre' por si acaso la DB espera ese nombre
             calibre: patch.product_details?.caliber || patch.product_details?.calibre || "",
             color: patch.product_details?.color || "",
             brix_grade: patch.product_details?.brix || "",
@@ -165,21 +179,59 @@ export const handler: Handler = async (event) => {
             code: shipmentCode
           };
 
-        console.log("Payload para insertar embarque:", payload);
-
-        const { error: shipError } = await sbAdmin
-          .from('shipments')
-          .insert(payload);
-
-        if (shipError) {
-            console.error("❌ MURIÓ LA AUTOMATIZACIÓN (DB Error):", shipError.message);
-            console.error("Detalles del error:", shipError.details, shipError.hint);
-            // No retornamos error 500 aquí para no colapsar la app al cliente, pero logueamos fuerte
-        } else {
-            console.log(`✅ Embarque automático CREADO con código: ${shipmentCode}`);
-        }
+        const { error: shipError } = await sbAdmin.from('shipments').insert(shipPayload);
+        if (shipError) console.error("❌ ERROR AL CREAR EMBARQUE:", shipError.message);
+        else console.log(`✅ Embarque automático CREADO con código: ${shipmentCode}`);
       } else {
-        console.log(`⚠️ Ya existe un embarque asociado a esta cotización. Ignorando.`);
+        console.log(`⚠️ Ya existe un embarque asociado a esta cotización.`);
+      }
+
+      // ==========================================
+      // 2. AUTOMATIZACIÓN DE FACTURA COMERCIAL
+      // ==========================================
+      const { data: existingInvoice } = await sbAdmin.from('invoices').select('id').eq('quote_id', id).maybeSingle();
+
+      if (!existingInvoice) {
+        console.log(`Generando factura automática para quote: ${id}`);
+        const invoiceNumber = await getNextInvoiceNumber(year);
+
+        // Calcular fechas
+        const issueDate = new Date().toISOString().split('T')[0];
+        const validUntil = patch.valid_until || currentQuote.valid_until;
+        let dueDate = validUntil;
+        if (!dueDate) {
+          const d = new Date();
+          d.setDate(d.getDate() + 5); // Por defecto 5 días si no había fecha
+          dueDate = d.toISOString().split('T')[0];
+        }
+
+        // Extraer totales de donde vengan (del patch o de la data actual)
+        const finalTotals = patch.totals || currentQuote.totals || {};
+        const totalAmount = Number(finalTotals.total || 0);
+
+        const invPayload = {
+          invoice_number: invoiceNumber,
+          quote_id: id,
+          client_id: patch.client_id || currentQuote.client_id,
+          status: 'UNPAID', // Nace como cuenta por cobrar
+          issue_date: issueDate,
+          due_date: dueDate,
+          boxes: Number(patch.boxes || currentQuote.boxes || 0),
+          pallets: Number(finalTotals.meta?.pallets || 0),
+          weight_kg: Number(patch.weight_kg || currentQuote.weight_kg || 0),
+          items: finalTotals.items || [], // Matriz comercial clonada idéntica
+          subtotal: totalAmount, 
+          tax_amount: 0, 
+          total: totalAmount,
+          amount_paid: 0,
+          notes: patch.terms || currentQuote.terms || ""
+        };
+
+        const { error: invError } = await sbAdmin.from('invoices').insert(invPayload);
+        if (invError) console.error("❌ ERROR AL CREAR FACTURA:", invError.message);
+        else console.log(`✅ Factura automática CREADA con código: ${invoiceNumber}`);
+      } else {
+        console.log(`⚠️ Ya existe una factura asociada a esta cotización.`);
       }
     }
 

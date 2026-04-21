@@ -6,7 +6,7 @@ import { useUILang } from "../lib/uiLanguage";
 import {
   LayoutGrid, Package, Users, Globe, ChevronDown, LogOut, Search, Loader2,
   UserCircle2, FileText, CheckCircle2, AlertCircle, ArrowRight, Ship, Target, BrainCircuit,
-  BarChart3,
+  BarChart3, Receipt,
 } from "lucide-react";
 
 const LOGO_WHITE = "/brand/freshconnect_blanco.svg";
@@ -49,7 +49,9 @@ export function AdminLayout({ title, subtitle, children }: { title?: string; sub
     { href: "/admin/messages", label: lang === "es" ? "Centro de Mensajes" : "Message Center", icon: Globe },
     { href: "/admin/shipments", label: lang === "es" ? "Embarques" : "Shipments", icon: Package },
     { href: "/admin/quotes", label: lang === "es" ? "Cotizaciones" : "Quotes", icon: FileText },
+    { href: "/admin/invoices", label: lang === "es" ? "Cuentas por Cobrar" : "Invoices", icon: Receipt },
     { href: "/admin/users", label: lang === "es" ? "Clientes" : "Clients", icon: Users },
+    
     
     // --- MÓDULO CRM & IA ---
     { href: "/admin/crm/leads", label: lang === "es" ? "Lead Center" : "Lead Center", icon: BrainCircuit }, 

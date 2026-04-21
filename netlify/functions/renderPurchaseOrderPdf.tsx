@@ -32,9 +32,13 @@ const styles = StyleSheet.create({
   gridCol: { flex: 1, padding: 12, border: `1 solid ${COLORS.BORDER}`, borderRadius: 6 },
   sectionLabel: { fontSize: 7, fontWeight: 'bold', color: COLORS.PRIMARY_LIGHT, textTransform: 'uppercase', marginBottom: 5, borderBottom: `1 solid ${COLORS.BG_SOFT}`, paddingBottom: 2 },
   buyerName: { fontSize: 10, fontWeight: 'bold', color: COLORS.PRIMARY, textTransform: 'uppercase' },
+  
+  // --- ESTILOS DE TABLA ACTUALIZADOS ---
   tableHeader: { flexDirection: 'row', backgroundColor: COLORS.PRIMARY, padding: 8, borderRadius: 4, marginBottom: 5 },
   th: { fontSize: 7, fontWeight: 'bold', color: '#ffffff', textTransform: 'uppercase' },
   tableRow: { flexDirection: 'row', padding: 8, borderBottom: `1 solid ${COLORS.BG_SOFT}`, alignItems: 'center' },
+  prodName: { fontSize: 9, fontWeight: 'bold', color: COLORS.TEXT_MAIN, textTransform: 'uppercase' },
+  
   techGrid: { flexDirection: 'row', border: `1 solid ${COLORS.BORDER}`, borderRadius: 6, marginBottom: 20, padding: 8, backgroundColor: COLORS.BG_SOFT },
   techItem: { flex: 1, borderRight: `1 solid ${COLORS.BORDER}`, paddingHorizontal: 5 },
   techItemLast: { flex: 1, paddingHorizontal: 5 },
@@ -61,18 +65,23 @@ const PdfTemplate = ({ data, brandDir }: { data: any, brandDir: string }) => {
   const specs = data.product_details || {};
   const item = (data.items_snapshot && data.items_snapshot[0]) || {};
 
-  // Corrección 1: Nomenclatura específica
-  const productName = "Piña";
-  const variety = "MD2 Golden";
+  // CORRECCIÓN DINÁMICA: Extraemos el producto real de la BD
+  const prodRel = Array.isArray(data.products) ? data.products[0] : (data.products || {});
+  const productName = prodRel.name || specs.product_name || specs.name || "Producto Fresco";
+  const variety = specs.variety || prodRel.variety || "N/A";
   
   const caliber = specs.caliber || specs.size || item.caliber || "N/A";
   const color = specs.color || specs.fruit_color || item.color || "N/A";
   const brix = specs.brix || specs.sugar_content || item.brix || "N/A";
 
-  // Corrección 2: Formato de número de PO oficial PO/YEAR/XXXX
+  const productLabel = variety !== "N/A" ? `${productName} - Variedad: ${variety}` : productName;
+
   const year = new Date(data.created_at).getFullYear();
   const rawNum = data.quote_number?.split('/').pop() || data.id.slice(0,4).toUpperCase();
   const poNumber = data.po_number || `PO/${year}/${rawNum}`;
+
+  // Extraer las líneas de cotización dinámicas
+  const quoteItems = data.totals?.items || [];
 
   const formatDateWithTime = (dateStr: string) => {
     const d = dateStr ? new Date(dateStr) : new Date();
@@ -84,11 +93,14 @@ const PdfTemplate = ({ data, brandDir }: { data: any, brandDir: string }) => {
   };
 
   const formatDateOnly = (dateStr: string) => {
-    const d = dateStr ? new Date(dateStr) : new Date();
+    if (!dateStr) return 'POR DEFINIR';
+    const cleanDate = dateStr.includes('T') ? dateStr : `${dateStr}T12:00:00Z`;
+    const d = new Date(cleanDate);
     return d.toLocaleDateString('es-PA', { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
-  const etd = data.etd || new Date(new Date(data.created_at).getTime() + 432000000).toISOString();
+  // HOMOLOGACIÓN: Usar exactamente la misma variable de la cotización
+  const etd = specs.requested_shipment_date;
 
   return (
     <Document title={`PO_${poNumber.replace(/\//g, '_')}`}>
@@ -119,7 +131,7 @@ const PdfTemplate = ({ data, brandDir }: { data: any, brandDir: string }) => {
             <Text style={styles.sectionLabel}>Dirigido a (Seller):</Text>
             <Text style={{ fontSize: 9, fontWeight: 'bold' }}>FRESH FOOD PANAMÁ, C.A.</Text>
             <Text style={{ fontSize: 8 }}>Vía Tocumen, Ciudad de Panamá</Text>
-            <Text style={{ fontSize: 8 }}>exports@freshfoodpanama.com</Text>
+            <Text style={{ fontSize: 8 }}>adminsitracion@freshfoodpanama.com</Text>
           </View>
         </View>
 
@@ -144,22 +156,48 @@ const PdfTemplate = ({ data, brandDir }: { data: any, brandDir: string }) => {
           <View style={styles.techItemLast}><Text style={styles.techLabel}>Grados Brix</Text><Text style={styles.techValue}>{brix}</Text></View>
         </View>
 
-        {/* TABLA DE COSTOS */}
+        {/* TABLA DE COSTOS Y RECARGOS (RENDERIZADO DINÁMICO) */}
         <View style={styles.tableHeader}>
-          <Text style={[styles.th, { flex: 3 }]}>Descripción del Pedido</Text>
-          <Text style={[styles.th, { flex: 1, textAlign: 'center' }]}>Cantidad (Cajas)</Text>
-          <Text style={[styles.th, { flex: 1.2, textAlign: 'right' }]}>Total (USD)</Text>
+          <Text style={[styles.th, { flex: 2.5 }]}>Descripción del Pedido / Servicio</Text>
+          <Text style={[styles.th, { flex: 0.8, textAlign: 'center' }]}>Cant.</Text>
+          <Text style={[styles.th, { flex: 1.2, textAlign: 'right' }]}>P. Unit (USD)</Text>
+          <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>Subtotal (USD)</Text>
         </View>
-        <View style={styles.tableRow}>
-          <View style={{ flex: 3 }}>
-            <Text style={{ fontSize: 10, fontWeight: 'bold' }}>{productName} {variety}</Text>
-            <Text style={{ fontSize: 7, color: COLORS.TEXT_LIGHT }}>Calidad Premium - Inspeccionado en Origen</Text>
+
+        {quoteItems.length > 0 ? (
+          /* Mapeo de todas las líneas dinámicas de la cotización */
+          quoteItems.map((item: any, index: number) => (
+            <View key={index} style={styles.tableRow}>
+              <View style={{ flex: 2.5 }}>
+                <Text style={styles.prodName}>{item.name}</Text>
+              </View>
+              <Text style={{ flex: 0.8, textAlign: 'center', fontSize: 9 }}>
+                {item.qty || 1}
+              </Text>
+              <Text style={{ flex: 1.2, textAlign: 'right', fontSize: 9 }}>
+                $ {Number(item.unit || item.total || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </Text>
+              <Text style={{ flex: 1.5, textAlign: 'right', fontWeight: 'bold', fontSize: 9 }}>
+                $ {Number(item.totalRow || item.total || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </Text>
+            </View>
+          ))
+        ) : (
+          /* Fallback para cotizaciones viejas (Muestra solo 1 fila) */
+          <View style={styles.tableRow}>
+            <View style={{ flex: 2.5 }}>
+              <Text style={styles.prodName}>{productLabel}</Text>
+              <Text style={{ fontSize: 7, color: COLORS.TEXT_LIGHT, marginTop: 2 }}>Calidad Premium - Inspeccionado en Origen</Text>
+            </View>
+            <Text style={{ flex: 0.8, textAlign: 'center', fontSize: 9 }}>{data.boxes || 0}</Text>
+            <Text style={{ flex: 1.2, textAlign: 'right', fontSize: 9 }}>
+               $ {((data.boxes || 0) > 0 ? (Number(finalTotal) / (data.boxes || 1)) : 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </Text>
+            <Text style={{ flex: 1.5, textAlign: 'right', fontWeight: 'bold', fontSize: 9 }}>
+              $ {Number(finalTotal).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+            </Text>
           </View>
-          <Text style={{ flex: 1, textAlign: 'center', fontSize: 10 }}>{data.boxes || 0}</Text>
-          <Text style={{ flex: 1.2, textAlign: 'right', fontWeight: 'bold' }}>
-            $ {Number(finalTotal).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-          </Text>
-        </View>
+        )}
 
         {/* FOOTER CON SELLO DIGITAL DETALLADO */}
         <View style={styles.footerSection}>
@@ -179,26 +217,22 @@ const PdfTemplate = ({ data, brandDir }: { data: any, brandDir: string }) => {
           <View style={styles.signatureArea}>
             <View style={styles.approvalStamp}>
               <Text style={styles.stampText}>APROBADO DIGITALMENTE</Text>
-              {/* Corrección 3: ID, Fecha y Hora */}
               <Text style={styles.stampDate}>AUTH-ID: {data.id.slice(0,12).toUpperCase()}</Text>
               <Text style={styles.stampDate}>{formatDateWithTime(data.updated_at)}</Text>
-            </View>
-            <View style={styles.signatureLine}>
-              <Text style={{ fontSize: 7, fontWeight: 'bold', color: COLORS.PRIMARY }}>FIRMA AUTORIZADA DEL CLIENTE</Text>
-              <Text style={{ fontSize: 6, color: COLORS.TEXT_LIGHT, marginTop: 2 }}>Verificado vía FreshConnect SaaS</Text>
             </View>
           </View>
         </View>
       </Page>
     </Document>
-  );
+  ); 
 };
 
 export const handler: Handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return optionsResponse();
   try {
     const id = event.queryStringParameters?.id;
-    const { data, error } = await sbAdmin.from("quotes").select("*, clients(*)").eq("id", id).maybeSingle();
+    // INYECCIÓN: Agregamos products(*) al select para recuperar el nombre dinámicamente
+    const { data, error } = await sbAdmin.from("quotes").select("*, clients(*), products(*)").eq("id", id).maybeSingle();
     if (error || !data) return text(404, "No encontrado");
 
     const brandDir = path.join(process.cwd(), "public", "brand");

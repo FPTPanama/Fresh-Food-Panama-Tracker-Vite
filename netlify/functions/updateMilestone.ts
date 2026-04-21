@@ -1,86 +1,84 @@
 import type { Handler } from "@netlify/functions";
-import { sbAdmin, getUserAndProfile, json, text, isPrivilegedRole, optionsResponse } from "./_util";
-
-const ALLOWED = new Set(["PACKED", "DOCS_READY", "AT_ORIGIN", "IN_TRANSIT", "AT_DESTINATION", "CREATED"]);
-
-function clean(v: any) {
-  return String(v ?? "").trim();
-}
+import { sbAdmin, getUserAndProfile, json, text, optionsResponse } from "./_util";
 
 export const handler: Handler = async (event) => {
+  // Manejo de pre-vuelo para CORS
   if (event.httpMethod === "OPTIONS") return optionsResponse();
-  if (event.httpMethod !== "POST") return text(405, "Method not allowed");
+  if (event.httpMethod !== "POST") return text(405, "Method Not Allowed");
 
   try {
+    // 1. Verificación de Seguridad
     const { user, profile } = await getUserAndProfile(event);
     if (!user || !profile) return text(401, "Unauthorized");
-    if (!isPrivilegedRole(profile.role || "")) return text(403, "Forbidden");
 
-    let body: any = {};
-    try {
-      body = JSON.parse(event.body || "{}");
-    } catch {
-      return text(400, "Body inválido (JSON requerido)");
+    // 2. Parseo del Payload
+    const body = JSON.parse(event.body || "{}");
+    const { 
+      shipmentId, 
+      type, 
+      note, 
+      flight_number, 
+      awb, 
+      calibre, // Viene del frontend
+      caliber, // Por si acaso
+      color, 
+      brix_grade 
+    } = body;
+
+    if (!shipmentId || !type) return text(400, "Faltan datos obligatorios (shipmentId o type)");
+
+    // 3. Actualizar la tabla principal de Embarques (Shipments)
+    const shipmentPayload = {
+      status: type,
+      flight_number: flight_number || null,
+      awb: awb || null,
+      caliber: caliber || calibre || null,
+      color: color || null,
+      brix_grade: brix_grade || null
+    };
+
+    const { error: shipErr } = await sbAdmin
+      .from("shipments")
+      .update(shipmentPayload)
+      .eq("id", shipmentId);
+
+    if (shipErr) {
+      console.error("Error BD Shipments:", shipErr.message);
+      throw new Error(`Fallo al actualizar embarque: ${shipErr.message}`);
     }
 
-    // --- FLEXIBILIDAD DE NOMBRES ---
-    const shipmentId = clean(body.shipmentId || body.shipment_id || body.id);
-    const typeRaw = clean(body.type || body.milestoneType || body.milestone_type || body.status).toUpperCase();
+    // 4. Insertar o Actualizar el Hito (Idempotencia Inteligente)
+    const { error: mileErr } = await sbAdmin
+      .from("milestones")
+      .upsert(
+        {
+          shipment_id: shipmentId,
+          type: type,
+          note: note || null,
+          actor_email: user.email,
+          created_by: user.id // Relación directa con el UUID del admin
+          
+          // 💡 AL NO ENVIAR EL CAMPO FECHA: 
+          // Postgres generará un timestamp automático si es nuevo, 
+          // o mantendrá LA FECHA ORIGINAL si es una actualización de nota.
+        },
+        { 
+          // Instrucción estricta para resolver el error "duplicate key value"
+          onConflict: "milestones_shipment_id_type_key" 
+        }
+      );
 
-    if (!shipmentId) return text(400, "Falta shipmentId");
-    if (!typeRaw) return text(400, "Falta type/status");
-    if (!ALLOWED.has(typeRaw)) return text(400, `type inválido: ${typeRaw}`);
-
-    const note = body.note == null ? null : clean(body.note) || null;
-    const flight_number = body.flight_number == null ? null : clean(body.flight_number) || null;
-    const awb = body.awb == null ? null : clean(body.awb) || null;
-    const color = body.color == null ? null : clean(body.color) || null;
-    
-    // 🚨 ARREGLO DE SPANGLISH: Aceptamos ambas del frontend, pero guardaremos estrictamente como 'caliber'
-    const calibreRaw = body.calibre ?? body.caliber;
-    const caliberFinal = calibreRaw == null ? null : clean(calibreRaw) || null;
-
-    if (typeRaw === "IN_TRANSIT" && !flight_number && !body.flight_number) {
-        console.warn(`[WARN] Embarque ${shipmentId} pasado a IN_TRANSIT sin número de vuelo.`);
+    if (mileErr) {
+      console.error("Error BD Milestones:", mileErr.message);
+      throw new Error(`Fallo al registrar el hito: ${mileErr.message}`);
     }
 
-    // 1) Actualiza shipments
-    const shipUpdate: any = { status: typeRaw };
-    
-    // Asignaciones quirúrgicas a los nombres de columna confirmados
-    if (flight_number !== null) shipUpdate.flight_number = flight_number;
-    if (awb !== null) shipUpdate.awb = awb;
-    if (color !== null) shipUpdate.color = color;
-    
-    // 👇 ESTA ES LA LÍNEA CORREGIDA PARA SUPABASE 👇
-    if (caliberFinal !== null) shipUpdate.caliber = caliberFinal; 
+    // 5. Respuesta Exitosa
+    return json(200, { success: true, message: "Hito actualizado correctamente" });
 
-    console.log(`Intentando actualizar shipment ${shipmentId} con:`, shipUpdate);
-
-    const { error: upErr } = await sbAdmin.from("shipments").update(shipUpdate).eq("id", shipmentId);
-    if (upErr) {
-        console.error("❌ Error de Supabase al actualizar shipment:", upErr.message);
-        return text(500, `Error BD actualizando embarque: ${upErr.message}`);
-    }
-
-    // 2) Registro de Milestone
-    const { error: msErr } = await sbAdmin.from("milestones").insert({
-        shipment_id: shipmentId,
-        type: typeRaw,
-        note: note || `Cambio de estado a ${typeRaw}`,
-        actor_email: user.email,
-        at: new Date().toISOString(),
-    });
-
-    if (msErr) {
-        console.warn(`[WARN] Milestone no insertado (posible duplicado): ${msErr.message}`);
-    }
-
-    console.log(`✅ Embarque ${shipmentId} actualizado a ${typeRaw} exitosamente.`);
-    return json(200, { ok: true, shipmentId, type: typeRaw });
-    
   } catch (e: any) {
-    console.error("❌ Error crítico no controlado en updateMilestone:", e.message);
-    return text(500, e?.message || "Server error");
+    console.error("Error crítico en updateMilestone:", e.message);
+    // Devolvemos el error exacto al frontend para que no sea un 500 "ciego"
+    return text(500, e.message || "Internal Server Error");
   }
 };

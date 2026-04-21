@@ -2,378 +2,499 @@ import type { Handler } from "@netlify/functions";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createClient } from "@supabase/supabase-js";
 
+// Inicialización de servicios
 const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
-// --- 1. MOTOR DE ENVÍO TWILIO (ENTREGA GARANTIZADA) ---
-const sendTwilioMessage = async (to: string, message: string, mediaUrl?: string): Promise<boolean> => {
-  const sid = process.env.TWILIO_ACCOUNT_SID?.trim();
-  const token = process.env.TWILIO_AUTH_TOKEN?.trim();
-  let fromEnv = process.env.TWILIO_WA_FROM?.trim() || "+14155238886";
+const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "7997949607:AAEmRwC8plKcLAToAI-zc083RU2dVx1_0uY";
+const MY_TELEGRAM_ID = "501141450";
 
-  const finalFrom = fromEnv.startsWith('whatsapp:') ? fromEnv : `whatsapp:${fromEnv}`;
-  const cleanTo = to.replace('whatsapp:', '').replace(/\s+/g, '');
-  const finalTo = `whatsapp:${cleanTo.startsWith('+') ? cleanTo : '+' + cleanTo}`;
+// ==========================================
+// 1. MOTORES DE SALIDA (CANAL DUAL BLINDADO)
+// ==========================================
 
-  const params = new URLSearchParams();
-  params.append("To", finalTo);
-  params.append("From", finalFrom);
-  if (message) params.append("Body", message);
-  if (mediaUrl) params.append("MediaUrl", mediaUrl);
+const sendTelegram = async (chatId: string | number, text: string, fileUrl?: string) => {
+  const cleanText = text.replace(/_/g, '\\_').replace(/\*/g, '**');
+  
+  if (fileUrl) {
+    // Tolerancia a parámetros de URL (ej: file.pdf?token=123)
+    const method = fileUrl.match(/\.(jpg|jpeg|png|webp)(\?.*)?$/i) ? 'sendPhoto' : 'sendDocument';
+    const url = `https://api.telegram.org/bot${TG_TOKEN}/${method}`;
+    const body: any = { chat_id: chatId };
+    body[method === 'sendPhoto' ? 'photo' : 'document'] = fileUrl;
+    body.parse_mode = "Markdown";
 
-  try {
-    const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Basic ${Buffer.from(`${sid}:${token}`).toString('base64')}`,
-        "Content-Type": "application/x-www-form-urlencoded"
-      },
-      body: params
-    });
-    return response.ok;
-  } catch (error) {
-    console.error("❌ ERROR TWILIO:", error);
-    return false;
+    if (cleanText.length <= 1000) {
+      body.caption = cleanText;
+      try {
+        await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      } catch (error) { console.error("❌ Fallo de red Telegram:", error); }
+    } else {
+      body.caption = cleanText.substring(0, 1000) + "...";
+      try {
+        await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      } catch (error) { console.error("❌ Fallo de red Telegram:", error); }
+      
+      const remainingText = "..." + cleanText.substring(1000);
+      const chunks = remainingText.match(/.{1,4000}/gs) || [];
+      for (const chunk of chunks) {
+        try {
+          await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, { 
+            method: "POST", headers: { "Content-Type": "application/json" }, 
+            body: JSON.stringify({ chat_id: chatId, text: chunk, parse_mode: "Markdown" }) 
+          });
+        } catch (error) { console.error("❌ Fallo de red Telegram:", error); }
+      }
+    }
+  } else {
+    const chunks = cleanText.match(/.{1,4000}/gs) || [""];
+    for (const chunk of chunks) {
+      try {
+        await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, { 
+          method: "POST", headers: { "Content-Type": "application/json" }, 
+          body: JSON.stringify({ chat_id: chatId, text: chunk, parse_mode: "Markdown" }) 
+        });
+      } catch (error) { console.error("❌ Fallo de red Telegram:", error); }
+    }
   }
 };
 
-export const handler: Handler = async (event) => {
-  if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method Not Allowed" };
+const sendWhatsApp = async (to: string, message: string, mediaUrl?: string) => {
+  const sid = process.env.TWILIO_ACCOUNT_SID;
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  const from = process.env.TWILIO_WA_FROM || "whatsapp:+14155238886";
+  const finalTo = to.startsWith('whatsapp:') ? to : `whatsapp:${to}`;
 
-  // Respuesta silenciosa para cerrar el Webhook sin enviar XML de texto
-  const quietResponse = () => ({ statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<?xml version="1.0" encoding="UTF-8"?><Response></Response>` });
+  if (mediaUrl) {
+    let firstPart = message;
+    let remainder = "";
+    if (message.length > 1500) {
+      firstPart = message.substring(0, 1500) + "...";
+      remainder = "..." + message.substring(1500);
+    }
+    
+    try {
+      await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+        method: "POST",
+        headers: { "Authorization": `Basic ${Buffer.from(`${sid}:${token}`).toString('base64')}`, "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ To: finalTo, From: from, Body: firstPart, MediaUrl: mediaUrl })
+      });
+    } catch (error) { console.error("❌ Fallo de red WhatsApp:", error); }
+    
+    if (remainder) {
+      const chunks = remainder.match(/.{1,1500}/gs) || [];
+      for (const chunk of chunks) {
+        await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+          method: "POST",
+          headers: { "Authorization": `Basic ${Buffer.from(`${sid}:${token}`).toString('base64')}`, "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ To: finalTo, From: from, Body: chunk })
+        });
+      }
+    }
+  } else {
+    const chunks = message.match(/.{1,1500}/gs) || [""];
+    for (const chunk of chunks) {
+      try {
+        await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+          method: "POST",
+          headers: { "Authorization": `Basic ${Buffer.from(`${sid}:${token}`).toString('base64')}`, "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ To: finalTo, From: from, Body: chunk })
+        });
+      } catch (error) { console.error("❌ Fallo de red WhatsApp:", error); }
+    }
+  }
+};
+
+const sendSmartMessage = async (senderId: string, platform: string, text: string, mediaUrl?: string) => {
+  if (platform === 'whatsapp') await sendWhatsApp(senderId, text, mediaUrl);
+  else await sendTelegram(senderId, text, mediaUrl);
+};
+
+// ==========================================
+// 2. LOGICA PRINCIPAL (ONE-MAN ARMY)
+// ==========================================
+
+export const handler: Handler = async (event) => {
+  const now = new Date().toLocaleString("es-PA", { timeZone: "America/Panama" });
+  console.log(`\n🚀 ATLAS SUPREMO ACTIVO - ${now}`);
+
+  if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method Not Allowed" };
+  const quietResponse = () => ({ statusCode: 200, body: "OK" });
 
   try {
-    const bodyParams = new URLSearchParams(event.body || "");
-    const senderNumber = bodyParams.get("From")?.replace("whatsapp:", "") || "";
-    const incomingMessage = bodyParams.get("Body") || "";
-    const mediaUrl = bodyParams.get("MediaUrl0");
-    const mediaType = bodyParams.get("MediaContentType0");
+    let bodyText = event.body || "";
+    if (event.isBase64Encoded) bodyText = Buffer.from(bodyText, 'base64').toString('utf-8');
 
-    const normalizedSender = senderNumber.startsWith('+') ? senderNumber : `+${senderNumber}`;
-    const dbSenderFormat = `whatsapp:${normalizedSender}`;
+    let platform: 'whatsapp' | 'telegram' = 'whatsapp';
+    let senderId = "";
+    let incomingMessage = "";
 
-    // --- 2. ESCUDO DE SEGURIDAD DIRECTO (PARCHE PARA EVITAR BLOQUEOS) ---
-    const AUTHORIZED_USERS: Record<string, { name: string, role: string }> = {
-      "+50763036338": { name: "Freddy", role: "admin" },
-      "+50762256452": { name: "David", role: "admin" },
-      "+13059248876": { name: "Victor", role: "ventas" },
-      "+50769365619": { name: "Pedro", role: "ventas" }
-    };
-
-    const user = AUTHORIZED_USERS[normalizedSender];
-
-    if (!user) {
-      console.warn(`🚨 INTRUSO BLOQUEADO O NÚMERO NO RECONOCIDO: ${normalizedSender}`);
-      return quietResponse(); // Silencio total para intrusos
-    }
-
-    console.log(`\n📩 IN: "${incomingMessage}" de ${user.name} (Rol: ${user.role})`);
-
-    // --- 3. PREPARACIÓN MULTIMODAL ---
-    const model = genAI.getGenerativeModel({ 
-      model: "gemini-3.1-flash-lite-preview", 
-      generationConfig: { responseMimeType: "application/json", temperature: 0.1 } // Temperatura baja para mayor precisión
-    });
-
-    let aiContent: any[] = [];
-    let mediaBuffer: ArrayBuffer | null = null;
-    
-    if (mediaUrl) {
-      const mediaResponse = await fetch(mediaUrl);
-      mediaBuffer = await mediaResponse.arrayBuffer();
-      aiContent.push({ inlineData: { data: Buffer.from(mediaBuffer).toString("base64"), mimeType: mediaType } });
-      aiContent.push(incomingMessage || "Analiza este archivo.");
+    if (bodyText.startsWith('{')) {
+      platform = 'telegram';
+      const tgData = JSON.parse(bodyText);
+      if (!tgData.message) return quietResponse();
+      senderId = tgData.message.from.id.toString();
+      incomingMessage = tgData.message.text || tgData.message.caption || "";
     } else {
-      if (!incomingMessage) return quietResponse();
-      aiContent.push(incomingMessage);
+      platform = 'whatsapp';
+      const waParams = new URLSearchParams(bodyText);
+      senderId = `+${(waParams.get("From") || "").replace(/\D/g, "")}`;
+      incomingMessage = waParams.get("Body") || "";
     }
 
-    // --- 4. CEREBRO DE ATLAS (CON PROTOCOLO DE FRENO DE MANO) ---
-    const { data: memories } = await supabase.from('agent_memory').select('rule_text');
-    const systemMemory = memories?.map(m => `- ${m.rule_text}`).join('\n') || "";
+    // --- SEGURIDAD INTELIGENTE ---
+    let user = null;
+    if (senderId === MY_TELEGRAM_ID || senderId.includes("63036338")) {
+      user = { name: "Freddy", role: "admin" };
+    } else {
+      const { data: dbUser } = await supabase.from('authorized_users')
+        .select('*')
+        .or(`phone_number.eq.${senderId},phone_number.eq.whatsapp:${senderId}`)
+        .maybeSingle();
+      if (dbUser) user = dbUser;
+    }
 
-    const prompt = `
-      # IDENTIDAD Y ROL
-      Eres "Atlas", el Agente de Inteligencia Artificial y COO Digital de Fresh Food Panamá.
-      Tu misión es que el Jefe Supremo (Freddy García) y su equipo sientan absoluta confianza en ti. Eres hiper-eficiente, proactivo, analítico y nunca te quedas sin respuesta. Conoces el negocio B2B de agro-exportación de principio a fin.
+    if (!user) return quietResponse();
+
+    // --- MODELO GEMINI 3.1 ---
+    const model = genAI.getGenerativeModel({ model: "gemini-3.1-flash-lite-preview", generationConfig: { responseMimeType: "application/json" } });
+
+    // --- MÓDULO DE ENTRENAMIENTO ---
+    if (incomingMessage.toLowerCase().startsWith("atlas, recuerda que")) {
+      const fact = incomingMessage.replace(/atlas, recuerda que/i, "").trim();
+      await supabase.from('agent_memory').insert({ rule_text: fact });
       
-      # CONTEXTO DEL USUARIO ACTUAL
-      Hablas con: ${user.name}.
-      Su rol de seguridad es: '${user.role}'.
-
-      # REGLAS DE ORO (EL PROTOCOLO "NUNCA MUDO")
-      1. NUNCA devuelvas un JSON vacío o te quedes en silencio. Si no entiendes, usa "CLARIFICACION". Si te hacen una pregunta abierta, usa "CHAT_GENERAL".
-      2. Si te piden investigar una empresa o lead externo, usa tu conocimiento general del mundo o analiza los datos proporcionados usando el intent "INVESTIGAR_LEAD".
-      3. Eres un experto en deducir "typos" (errores ortográficos). Si escriben "fitozanitario", "gui aerea", o "cotisacion", asume la intención correcta o clarifica amablemente sin fallar.
-
-      # DICCIONARIO Y CULTURA DE LA EMPRESA (FRESH FOOD PANAMÁ)
-      - Documentos: Fito = Fitosanitario. AWB = Guía Aérea / BL. EUR1 = Certificado de Origen. Invoice = Factura.
-      - Operaciones: PO = Orden de Compra. Pics = Fotos/Evidencia. Check = Inspección. Pallet = Parihuela.
-      - Cultura B2B: Hablas de márgenes, ETD (Estimated Time of Departure), calibres de fruta (piña, papaya, etc.), aerolíneas y aduanas de forma fluida y profesional.
-
-      # PROTOCOLO DE INTERACCIÓN POR ROL
-      - Si hablas con Freddy ('admin'): Tu tono es ejecutivo, directo, basado en datos. Te anticipas a sus necesidades. Si él pide el teléfono de un cliente, se lo das, pero también le ofreces un resumen de su estado si es relevante.
-      - Si hablas con 'ventas': Eres su brazo derecho comercial. Los ayudas a cotizar rápido y sin errores.
-      - Si hablas con 'logistica' o 'calidad': Eres su archivador automático y auditor. Tono claro y operativo.
-
-      # PROTOCOLO DE FRENO DE MANO (SEGURIDAD EN BD)
-      - Para alterar la base de datos (CREAR_CLIENTE, GESTION_COTIZACION, GESTION_USUARIOS), NUNCA ejecutes en el primer mensaje.
-      - PASO 1: Recopila info faltante, muestra el RESUMEN y pregunta explícitamente: "¿Procedo a ejecutar esto en el sistema?". (AQUÍ "execute_action": false).
-      - PASO 2: SOLO si el usuario confirma (ej. "Sí", "dale", "procede"), cambias a "execute_action": true.
-
-      # MEMORIA DE APRENDIZAJE CONTINUO
-      ${systemMemory}
-
-      # INSTRUCCIONES DE ENRUTAMIENTO (INTENTS)
-      Analiza el mensaje del usuario y clasifícalo estrictamente en uno de estos intents:
-      - CONSULTA_CRM: Si el usuario pide el teléfono, email, o historial de un cliente existente.
-      - INVESTIGAR_LEAD: Si el usuario te pide investigar o analizar una empresa/lead comercial ("Investiga a Global Fruits de España").
-      - CREAR_CLIENTE: Para dar de alta empresas (Requiere: Nombre, Contacto, Email).
-      - GESTION_COTIZACION: Crear o modificar un 'quote' comercial.
-      - PROCESAR_ARCHIVO_ENTRANTE: Si enviaron un PDF o Foto para OCR y archivo.
-      - OBTENER_ARCHIVO: Si piden buscar un Fito, AWB, PDF o Foto existente.
-      - GESTION_USUARIOS: Solo Admin. Dar o quitar acceso a Atlas.
-      - CLARIFICACION: Si el mensaje es muy confuso o le faltan datos críticos.
-      - CHAT_GENERAL: Para preguntas, asesoría logística, redacción de correos, o cualquier otra cosa.
-      - ACCESO_DENEGADO: Si el rol del usuario no le permite hacer lo que pide.
-
-      # FORMATO ESTRICTO DE SALIDA (JSON)
-      {
-        "intent": "CONSULTA_CRM" | "INVESTIGAR_LEAD" | "CREAR_CLIENTE" | "GESTION_COTIZACION" | "PROCESAR_ARCHIVO_ENTRANTE" | "OBTENER_ARCHIVO" | "GESTION_USUARIOS" | "CLARIFICACION" | "CHAT_GENERAL" | "ACCESO_DENEGADO",
-        "chat_response": "Tu respuesta al usuario. Actúa como el mejor COO del mundo.",
-        "execute_action": false,
-        "query_data": { "target_name": "Nombre del cliente o lead a buscar" },
-        "client_data": { "client_name": "...", "contact_name": "...", "email": "..." },
-        "doc_info": { "doc_type": "...", "extracted_client": "...", "extracted_destination": "..." },
-        "file_request": { "resource": "...", "client_name": "...", "doc_type": "...", "code": "..." },
-        "user_action": { "action": "add"|"remove", "target_phone": "...", "target_name": "...", "target_role": "..." },
-        "quote_data": { "action": "create" | "update", "price": 0 }
-      }
-    `;
-
-    aiContent.unshift(prompt);
-    const result = await model.generateContent(aiContent);
-    const ai = JSON.parse(result.response.text());
-    const baseUrl = process.env.URL || 'https://app.freshfoodpanama.com';
-
-    // ==========================================
-    // 🛡️ RECHAZOS Y CLARIFICACIONES
-    // ==========================================
-    if (ai.intent === "ACCESO_DENEGADO" || ai.intent === "CLARIFICACION") {
-      await sendTwilioMessage(dbSenderFormat, ai.chat_response);
+      const trainingPrompt = `Eres Atlas, el COO Digital de Fresh Food Panamá. El Jefe Freddy acaba de darte una instrucción de aprendizaje: "${fact}". 
+      Confirma que la has memorizado y explica brevemente cómo esta regla optimizará tu gestión de ahora en adelante. Tono ejecutivo y eficiente.`;
+      
+      const trainingResult = await model.generateContent(trainingPrompt);
+      const confirmationText = trainingResult.response.text();
+      
+      await sendSmartMessage(senderId, platform, confirmationText);
       return quietResponse();
     }
 
-    // ==========================================
-    // 🏢 CREACIÓN DE CLIENTES (CON FRENO DE MANO)
-    // ==========================================
-    if (ai.intent === "CREAR_CLIENTE") {
-      const cData = ai.client_data;
-      
-      if (!ai.execute_action) {
-        await sendTwilioMessage(dbSenderFormat, ai.chat_response);
-        return quietResponse(); 
-      }
-      
-      const { error: clientError } = await supabase.from('clients').insert({
-        name: cData.client_name, contact_name: cData.contact_name, contact_email: cData.email,
-        internal_notes: `⚠️ Creado vía Atlas por ${user.name}. Pendiente completar datos.`
-      });
+    // --- INYECCIÓN: SISTEMA DETERMINISTA AISLADO ---
+    let ai = null;
+    let skipGemini = false;
+    const confirmRegex = /^(si|sí|procede|dale|hazlo|ok|okay|yes|env[íi]alo|ejecuta|confirmo)/i;
 
-      if (clientError) {
-        await sendTwilioMessage(dbSenderFormat, `⚠️ Error de base de datos al crear: ${clientError.message}`);
-        return quietResponse();
-      }
-      
-      await sendTwilioMessage(dbSenderFormat, `✅ ¡Ejecutado con éxito, ${user.name}!\n\n🏢 Empresa: ${cData.client_name}\n👤 Contacto: ${cData.contact_name}\n📧 Email: ${cData.email}\n\n📝 El cliente ya está en FreshConnect.`);
-      return quietResponse();
-    }
+    if (confirmRegex.test(incomingMessage.trim())) {
+      const { data: pendingLog } = await supabase
+        .from('automation_logs')
+        .select('*')
+        .eq('rule_title', 'PENDING_ACTION')
+        .eq('recipient_name', `PENDING_${senderId}`)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-    // ==========================================
-    // 📝 GESTIÓN DE COTIZACIONES
-    // ==========================================
-    if (ai.intent === "GESTION_COTIZACION") {
-      if (!ai.execute_action) {
-        await sendTwilioMessage(dbSenderFormat, ai.chat_response);
-        return quietResponse();
-      }
-
-      const qData = ai.quote_data;
-      if (qData.action === "update") {
-        const { data: draft } = await supabase.from('quotes').select('*').eq('status', 'draft').order('created_at', { ascending: false }).limit(1).single();
-        if (!draft) {
-          await sendTwilioMessage(dbSenderFormat, "⚠️ No hay borradores para actualizar.");
-          return quietResponse();
+      if (pendingLog) {
+        const diffMins = (new Date().getTime() - new Date(pendingLog.created_at).getTime()) / 60000;
+        if (diffMins < 15) {
+          try {
+            const savedData = JSON.parse(pendingLog.message_text);
+            ai = {
+              intent: savedData.intent,
+              execute_action: true,
+              user_action: savedData.user_action,
+              search_params: savedData.search_params,
+              calendar_data: savedData.calendar_data,
+              chat_response: "✅ Orden recibida."
+            };
+            skipGemini = true;
+            await supabase.from('automation_logs').delete().eq('id', pendingLog.id);
+          } catch (e) { console.error("Error al leer PENDING_ACTION:", e); }
         }
+      }
+    }
+
+    // --- PROCESAMIENTO NORMAL DE GEMINI ---
+    if (!skipGemini) {
+      const { data: memories } = await supabase.from('agent_memory').select('rule_text');
+      const systemMemory = memories?.map(m => `- ${m.rule_text}`).join('\n') || "";
+
+      const { data: recentLogs } = await supabase
+        .from('automation_logs')
+        .select('recipient_name, message_text, rule_title, created_at')
+        .neq('rule_title', 'PENDING_ACTION')
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      const chatContext = recentLogs?.reverse().map(l => 
+        `[${l.rule_title || 'LOG'}] Para ${l.recipient_name}: ${l.message_text}`
+      ).join('\n') || "Sin historial reciente.";
+
+      const prompt = `
+        # IDENTIDAD SUPREMA Y ROL (ONE-MAN ARMY)
+        Eres "Atlas", el COO Digital Omnisapiente y Asistente Ejecutivo Supremo de Fresh Food Panamá.
+        Tu conocimiento y capacidades son absolutas. Eres un "one-man army" diseñado para dirigir la logística, las ventas, la administración y la agenda del negocio bajo la supervisión estricta de tu Jefe Supremo.
+        Hablas con: ${user.name} (${user.role}). Hora local: ${now}.
+
+        # REGLA DE RE-INYECCIÓN Y CONTEXTO (MÁXIMA PRIORIDAD)
+        Si el usuario te dice "si", "procede" o "hazlo", DEBES mirar el HISTORIAL RECIENTE adjunto.
+        Si el último log es del tipo [PENDING_ACTION], el campo "message_text" contiene el JSON técnico exacto que ibas a ejecutar. 
+        RECONSTRUYE ese JSON en tu "user_action" y establece "execute_action": true. 
+        NUNCA confundas un registro (add) con un mensaje (message) y NO pidas más confirmaciones si ya te dijeron que sí.
+
+        # REGLA INQUEBRANTABLE (CERO ALUCINACIONES DE NOMBRES)
+        NUNCA alteres ni "corrijas" el nombre del destinatario. Si el Jefe te pide enviarle un mensaje a "Freddy" (él mismo), pon EXACTAMENTE "Freddy" en el "target_name". No asumas que es un error ni lo sustituyas por otro empleado.
+
+        # HISTORIAL RECIENTE DE ATLAS:
+        ${chatContext}
         
-        const { data: updated } = await supabase.from('quotes').update({ price: qData.price }).eq('id', draft.id).select('id').single();
-        if (updated) {
-          await sendTwilioMessage(dbSenderFormat, `✅ Cotización actualizada con éxito.`, `${baseUrl}/.netlify/functions/renderQuotePdf?id=${updated.id}`);
-          return quietResponse();
+        # REGLA INQUEBRANTABLE (FRENO DE MANO ABSOLUTO / ZERO-TRUST)
+        JAMÁS modifiques, crees, actualices, agendes o subas documentos al sistema sin la confirmación explícita del Jefe. 
+        Para cualquier acción que altere la realidad (base de datos, calendario, cotizaciones, accesos), SIEMPRE debes enviar "execute_action": false primero, dar un resumen ejecutivo de lo que harás y preguntar: "¿Me confirma que procedo?". Solo actúas (cambiando a true) si el Jefe dice "Sí", "Procede", "Dale".
+        NOTA: Extraer listas, consultar inventario, buscar archivos o dar resúmenes NO requiere confirmación. Lo ejecutas inmediatamente.
+
+        # CAPACIDADES ABSOLUTAS Y REGLAS DE ENRUTAMIENTO (INTENTS)
+        - CONSULTA_EQUIPO: Si el Jefe pide "quiénes trabajan", "lista del equipo", "usuarios".
+        - GESTION_USUARIOS: "Agrega al inspector X con número...", "Elimina a...", "Envíale un mensaje a..." -> Da/quita acceso o envía notificaciones a terceros (Requiere confirmación).
+        - CONSULTA_LOGS: Solo para "logs", "auditoría", "historial de mensajes", "qué le has dicho a...". NUNCA lo confundas con embarques.
+        - CONSULTA_CLIENTES: Si el Jefe pide "lista de clientes", "todos los clientes".
+        - CONSULTA_INVENTARIO: Si piden "stock", "cuantos nos quedan", "inventario", "corbatines", "cajas".
+        - CONSULTA_EMBARQUES: Solo para "embarques", "cargas", "status logística", "contenedores", "piña".
+        - OBTENER_ARCHIVO: "foto", "AWB", "Fito", "factura", "documento de [EMBARQUE]" -> Extrae archivos del Storage.
+        - CONSULTA_CRM: "teléfono", "contacto", "email de [EMPRESA]" -> Extrae datos de un cliente en específico.
+        - INVESTIGAR_LEAD: "Investiga a [EMPRESA]" -> Usa tu omnisciencia para analizar mercados.
+        - CREAR_CLIENTE: "Añade a la empresa..." -> Prepara alta en BD (Requiere confirmación).
+        - GESTION_COTIZACION: "Cotiza...", "Actualiza precio..." -> Maneja quotes (Requiere confirmación).
+        - PROCESAR_ARCHIVO_ENTRANTE: Si recibes una foto o PDF -> Lo lees, analizas y preparas archivo.
+        - GESTION_CALENDARIO: "Agenda una reunión con...", "Recuérdame..." -> Prepara eventos o recordatorios.
+        - ANALISIS_GLOBAL: Redacción de correos corporativos de alto nivel, análisis estratégico, traducciones.
+        - CLARIFICACION: Si el audio o texto es incomprensible.
+        - CHAT_GENERAL: Asistencia diaria, dudas, o saludos.
+
+        # DICCIONARIO LOGÍSTICO Y CONTEXTO
+        - Fito = Fitosanitario. AWB = Guía Aérea / BL. PO = Orden de Compra.
+        - Operas con total fluidez en agro-exportación B2B, incoterms y aduanas.
+        
+        # MEMORIA CONTINUA Y CONTEXTO
+        ${systemMemory}
+
+        # INSTRUCCIONES DE FORMATO OBLIGATORIO (SOLO JSON VÁLIDO)
+        Devuelve ÚNICAMENTE la siguiente estructura exacta:
+        {
+          "intent": "CONSULTA_EQUIPO" | "GESTION_USUARIOS" | "CONSULTA_LOGS" | "CONSULTA_CLIENTES" | "CONSULTA_INVENTARIO" | "CONSULTA_EMBARQUES" | "CONSULTA_CRM" | "INVESTIGAR_LEAD" | "CREAR_CLIENTE" | "GESTION_COTIZACION" | "PROCESAR_ARCHIVO_ENTRANTE" | "OBTENER_ARCHIVO" | "GESTION_CALENDARIO" | "ANALISIS_GLOBAL" | "CLARIFICACION" | "CHAT_GENERAL",
+          "chat_response": "Tu respuesta ejecutiva. Si es consulta de BD, no des los datos aquí, los insertaremos en código.",
+          "execute_action": false,
+          "shipment_data": { "client_name": "Nombre de empresa", "status": "active|in_transit|all" },
+          "search_params": { "item_name": "Nombre de inventario a buscar", "target_name": "Nombre a buscar en CRM o clientes" },
+          "client_data": { "client_name": "...", "contact_name": "...", "email": "..." },
+          "doc_info": { "doc_type": "...", "extracted_client": "..." },
+          "file_request": { "resource": "shipment_file" | "quote", "client_name": "...", "doc_type": "AWB|Fito|Foto|etc", "code": "Código" },
+          "user_action": { "action": "add"|"remove"|"message", "target_phone": "...", "target_name": "...", "target_role": "admin|ventas|logistica|inspector", "message_text": "..." },
+          "calendar_data": { "action": "create|read", "title": "...", "date_time": "..." }
         }
-      }
+      `;
+
+      const result = await model.generateContent([prompt, incomingMessage]);
+      const rawResponse = result.response.text();
       
-      await sendTwilioMessage(dbSenderFormat, `✅ Acción ejecutada sobre la cotización.`);
+      try {
+        ai = JSON.parse(rawResponse.replace(/```json|```/g, "").trim());
+      } catch (e) {
+        console.error("❌ Fallo de JSON AI:", rawResponse);
+        ai = { intent: "CHAT_GENERAL", chat_response: "Jefe, tuve un error de formato interno al estructurar mi respuesta." };
+      }
+    }
+
+    // --- MOTOR DE EJECUCION ---
+
+    // 1. Auditoría de Logs
+    if (ai.intent === "CONSULTA_LOGS") {
+      const { data: logs } = await supabase.from('automation_logs').select('*').order('created_at', { ascending: false }).limit(20);
+      if (logs && logs.length > 0) {
+        const list = logs.map(l => `🕒 ${new Date(l.created_at).toLocaleTimeString('es-PA')} - 👤 *${l.recipient_name}*\n💬 "${l.message_text}"`).join('\n\n');
+        await sendSmartMessage(senderId, platform, `📋 *HISTORIAL DE AUDITORÍA:*\n\n${list}`);
+      } else {
+        await sendSmartMessage(senderId, platform, "Jefe, no hay mensajes registrados recientemente.");
+      }
       return quietResponse();
     }
 
-    // ==========================================
-    // 📸 PROCESAR ARCHIVO ENTRANTE (OCR + STORAGE AUTOMÁTICO)
-    // ==========================================
-    if (ai.intent === "PROCESAR_ARCHIVO_ENTRANTE" && mediaBuffer && mediaType) {
-      if (!ai.execute_action) {
-         await sendTwilioMessage(dbSenderFormat, ai.chat_response);
-         return quietResponse();
-      }
-
-      const doc = ai.doc_info;
-      let sQuery = supabase.from('shipments').select('id, code').order('created_at', { ascending: false });
-      if (doc.extracted_client) {
-         const { data: cl } = await supabase.from('clients').select('id').ilike('name', `%${doc.extracted_client}%`).limit(1).single();
-         if (cl) sQuery = sQuery.eq('client_id', cl.id);
-      }
-      const { data: ship } = await sQuery.limit(1).maybeSingle();
-
-      if (!ship) {
-        await sendTwilioMessage(dbSenderFormat, `⚠️ Leí el archivo y parece un ${doc.doc_type} para ${doc.extracted_client || 'un cliente desconocido'}, pero no encontré un embarque activo que coincida.`);
-        return quietResponse();
-      }
-
-      const ext = mediaType.includes('pdf') ? 'pdf' : mediaType.includes('jpeg') ? 'jpg' : mediaType.includes('png') ? 'png' : 'bin';
-      const bucketName = (ext === 'jpg' || ext === 'png') ? 'shipment-photos' : 'shipment-docs';
-      const fileName = `${doc.doc_type.replace(/\s/g, '_')}_${Date.now()}.${ext}`;
-      const filePath = `${ship.id}/${fileName}`;
-
-      const { error: uploadErr } = await supabase.storage.from(bucketName).upload(filePath, mediaBuffer, { contentType: mediaType });
-      if (uploadErr) {
-        await sendTwilioMessage(dbSenderFormat, `⚠️ Error al guardar el archivo en la nube: ${uploadErr.message}`);
-        return quietResponse();
-      }
-
-      await supabase.from('shipment_files').insert({
-        shipment_id: ship.id, doc_type: doc.doc_type, storage_path: `${bucketName}/${filePath}`, filename: fileName
-      });
-
-      await sendTwilioMessage(dbSenderFormat, `✅ Archivo guardado. La IA lo identificó como **${doc.doc_type}** y lo archivó en el embarque **${ship.code}**.`);
-      return quietResponse();
-    }
-
-    // ==========================================
-    // 👥 GESTIÓN USUARIOS (SOLO ADMIN)
-    // ==========================================
+    // 2. Gestión de Usuarios y Mensajería
     if (ai.intent === "GESTION_USUARIOS" && user.role === 'admin') {
+      const ua = ai.user_action;
+
       if (!ai.execute_action) {
-        await sendTwilioMessage(dbSenderFormat, ai.chat_response);
+        await supabase.from('automation_logs').insert({
+          recipient_name: `PENDING_${senderId}`,
+          channel: 'internal',
+          message_text: JSON.stringify({ intent: ai.intent, user_action: ua }), 
+          rule_title: 'PENDING_ACTION'
+        });
+        
+        await sendSmartMessage(senderId, platform, ai.chat_response);
         return quietResponse();
       }
       
-      const ua = ai.user_action;
-      if (ua.action === "add") await supabase.from('authorized_users').upsert({ phone_number: ua.target_phone, name: ua.target_name, role: ua.target_role });
-      if (ua.action === "remove") await supabase.from('authorized_users').delete().eq('phone_number', ua.target_phone);
-      
-      await sendTwilioMessage(dbSenderFormat, `✅ ${ai.chat_response}`);
-      return quietResponse();
-    }
-
-    // ==========================================
-    // 📄 OBTENER ARCHIVO (CÓDIGO COMPLETO RESTAURADO)
-    // ==========================================
-    if (ai.intent === "OBTENER_ARCHIVO") {
-      const fr = ai.file_request;
-      let filesFound = false;
-
-      if (fr.resource === "quote") {
-        let qQuery = supabase.from('quotes').select('id, quote_number').order('created_at', { ascending: false });
-        if (fr.code) qQuery = qQuery.ilike('quote_number', `%${fr.code}%`);
-        else if (fr.client_name) {
-          const { data: cl } = await supabase.from('clients').select('id').ilike('name', `%${fr.client_name}%`).limit(1).single();
-          if (cl) qQuery = qQuery.eq('client_id', cl.id);
-        }
-        const { data: quote } = await qQuery.limit(1).maybeSingle();
-        if (quote) {
-            await sendTwilioMessage(dbSenderFormat, `📄 Cotización ${quote.quote_number}`, `${baseUrl}/.netlify/functions/renderQuotePdf?id=${quote.id}`);
-            filesFound = true;
-        }
-      } 
-      else if (fr.resource === "shipment_file") {
-        let sQuery = supabase.from('shipments').select('id, code').order('created_at', { ascending: false });
-        if (fr.code) sQuery = sQuery.ilike('code', `%${fr.code}%`);
-        const { data: ship } = await sQuery.limit(1).maybeSingle();
+      if (ua?.action === "add" || ua?.action === "remove") {
+        const rawPhone = ua.target_phone || "";
+        let cleanPhone = rawPhone.replace(/\D/g, "");
+        if (cleanPhone) cleanPhone = `+${cleanPhone}`;
         
-        if (ship) {
-          const searchTag = fr.doc_type?.toLowerCase() || "";
-          const isMultiple = searchTag.includes('foto') || incomingMessage.toLowerCase().includes('fotos');
-
-          const { data: files } = await supabase.from('shipment_files')
-            .select('storage_path, doc_type')
-            .eq('shipment_id', ship.id)
-            .or(`doc_type.ilike.%${searchTag}%,filename.ilike.%${searchTag}%`)
-            .limit(isMultiple ? 5 : 1);
-
-          if (files && files.length > 0) {
-            for (const f of files) {
-              const bucket = f.doc_type.toLowerCase().includes('foto') ? 'shipment-photos' : 'shipment-docs';
-              const cleanPath = f.storage_path.replace(`${bucket}/`, '');
-              const { data: signed } = await supabase.storage.from(bucket).createSignedUrl(cleanPath, 3600);
-              if (signed?.signedUrl) {
-                await sendTwilioMessage(dbSenderFormat, `📦 ${f.doc_type.toUpperCase()} (${ship.code})`, signed.signedUrl);
-                filesFound = true;
-              }
-            }
-          }
-        }
-      }
-      
-      if (!filesFound) await sendTwilioMessage(dbSenderFormat, `⚠️ No encontré el archivo solicitado.`);
-      return quietResponse();
-    }
-
-    // ==========================================
-    // 📞 CONSULTA CRM (Súper Memoria de Clientes)
-    // ==========================================
-    if (ai.intent === "CONSULTA_CRM") {
-      const target = ai.query_data?.target_name;
-      if (target) {
-        const { data: clients } = await supabase.from('clients')
-          .select('name, contact_name, contact_email, phone, country, internal_notes')
-          .ilike('name', `%${target}%`)
-          .limit(1);
-
-        if (clients && clients.length > 0) {
-          const c = clients[0];
-          const info = `🏢 *${c.name}*\n👤 Contacto: ${c.contact_name || 'N/A'}\n📧 Email: ${c.contact_email}\n📞 Teléfono: ${c.phone || 'No registrado'}\n📍 País: ${c.country || 'No registrado'}\n📝 Notas: ${c.internal_notes || 'Ninguna'}`;
+        if (ua.action === "add" && cleanPhone) {
+          await supabase.from('authorized_users').upsert({ phone_number: cleanPhone, name: ua.target_name, role: ua.target_role || 'inspector' });
           
-          const crmPrompt = `El usuario preguntó por ${target}. La base de datos arrojó esto: ${info}. Dale la información de forma ejecutiva como su COO.`;
-          const finalCrmResponse = await model.generateContent(crmPrompt);
-          await sendTwilioMessage(dbSenderFormat, finalCrmResponse.response.text());
-          return quietResponse();
+          await supabase.from('automation_logs').insert({
+            recipient_name: ua.target_name,
+            channel: platform,
+            message_text: `Alta de usuario: ${ua.target_name} (${cleanPhone})`,
+            rule_title: 'USER_REGISTRATION'
+          });
+
+          await sendSmartMessage(senderId, platform, `✅ ¡Hecho! **${ua.target_name}** ha sido autorizado con el número ${cleanPhone}. Ya puede interactuar con Atlas.`);
+        } else if (ua.action === "remove" && cleanPhone) {
+          await supabase.from('authorized_users').delete().eq('phone_number', cleanPhone);
+          await sendSmartMessage(senderId, platform, `✅ Acceso revocado para el número ${cleanPhone}.`);
         } else {
-          await sendTwilioMessage(dbSenderFormat, `Jefe, busqué a "${target}" en nuestra base de datos pero no tengo registros. ¿Desea que lo investigue como un Lead externo o que lo demos de alta?`);
-          return quietResponse();
+          await sendSmartMessage(senderId, platform, `⚠️ Jefe, necesito un número de teléfono válido para ejecutar esta acción.`);
         }
+      } else if (ua?.action === "message") {
+        const searchName = (ua.target_name || "").trim().split(' ')[0]; 
+        if (!searchName) {
+            await sendSmartMessage(senderId, platform, `⚠️ Jefe, no logré identificar el destinatario en su instrucción.`);
+            return quietResponse();
+        }
+
+        const { data: targetUser } = await supabase.from('authorized_users')
+          .select('*')
+          .ilike('name', `%${searchName}%`)
+          .maybeSingle();
+
+        if (targetUser && targetUser.phone_number) {
+          await sendWhatsApp(targetUser.phone_number, `Hola ${targetUser.name}, Atlas te informa por orden de Freddy: ${ua.message_text}`);
+          
+          await supabase.from('automation_logs').insert({
+            recipient_name: targetUser.name,
+            channel: 'whatsapp',
+            message_text: ua.message_text,
+            rule_title: 'Mensaje Directo del Jefe'
+          });
+
+          await sendSmartMessage(senderId, platform, `📡 Mensaje enviado exitosamente a ${targetUser.name} y registrado en auditoría.`);
+        } else {
+          await sendSmartMessage(senderId, platform, `⚠️ No encontré a "${ua.target_name}" en la base de datos de usuarios autorizados.`);
+        }
+      }
+      return quietResponse();
+    }
+
+    // 3. Consulta de Equipo
+    if (ai.intent === "CONSULTA_EQUIPO") {
+      const { data: team } = await supabase.from('authorized_users').select('*');
+      const list = team?.map(u => `👤 *${u.name}* - ${u.role}\n📞 ${u.phone_number}`).join('\n\n') || "No hay otros usuarios.";
+      await sendSmartMessage(senderId, platform, `Jefe, este es el personal autorizado:\n\n${list}`);
+      return quietResponse();
+    }
+
+    // 4. Consulta de Clientes
+    if (ai.intent === "CONSULTA_CLIENTES") {
+      const { data: clients } = await supabase.from('clients').select('name, contact_name, country');
+      const list = clients?.map(c => `🏢 *${c.name}* (${c.country || 'N/A'})\n👤 ${c.contact_name || 'Sin contacto'}`).join('\n\n') || "Sin clientes.";
+      await sendSmartMessage(senderId, platform, `Directorio de Clientes:\n\n${list}`);
+      return quietResponse();
+    }
+
+    // 5. Inventario (Omnisciente)
+    if (ai.intent === "CONSULTA_INVENTARIO") {
+      const { data: items } = await supabase.from('inventory').select('*').ilike('item_name', `%${ai.search_params?.item_name || ''}%`);
+      const report = items?.map(i => `📦 *${i.item_name}*: ${i.quantity} ${i.unit}`).join('\n') || "Sin stock en bodega.";
+      await sendSmartMessage(senderId, platform, `Reporte de Inventario:\n\n${report}`);
+      return quietResponse();
+    }
+
+    // 6. Embarques
+    if (ai.intent === "CONSULTA_EMBARQUES") {
+      const { data: ships, error } = await supabase.from('shipments').select('*').order('created_at', { ascending: false }).limit(5);
+      if (error) { await sendSmartMessage(senderId, platform, `❌ Error BD: ${error.message}`); return quietResponse(); }
+      const list = ships?.map(s => `🚢 *${s.code || s.id}*\n▫️ Status: ${s.status}\n📍 Destino: ${s.destination}`).join('\n\n') || "No hay embarques.";
+      await sendSmartMessage(senderId, platform, `Últimos Embarques:\n\n${list}`);
+      return quietResponse();
+    }
+
+    // 7. Obtener Archivo (Búsqueda de Alta Precisión)
+    if (ai.intent === "OBTENER_ARCHIVO") {
+      const docTypeQuery = ai.file_request?.doc_type || ai.search_params?.doc_type || '';
+      const clientQuery = ai.file_request?.client_name || ai.search_params?.target_name || '';
+
+      // Búsqueda inteligente: tipo de documento primero
+      let dbQuery = supabase.from('shipment_files').select('*');
+      if (docTypeQuery) dbQuery = dbQuery.ilike('doc_type', `%${docTypeQuery}%`);
+
+      const { data: files, error: dbError } = await dbQuery.limit(10);
+
+      if (dbError) {
+          await sendSmartMessage(senderId, platform, `❌ Error de BD al buscar documento: ${dbError.message}`);
+          return quietResponse();
+      }
+
+      if (files && files.length > 0) {
+        // Filtrar inteligentemente por cliente si fue mencionado
+        let selectedFile = files[0];
+        if (clientQuery) {
+           const matched = files.find(f => JSON.stringify(f).toLowerCase().includes(clientQuery.toLowerCase()));
+           if (matched) selectedFile = matched;
+        }
+
+        const storagePath = selectedFile.storage_path;
+        let bucket = 'shipment-docs';
+        let path = storagePath;
+
+        // Extraer dinámicamente el bucket del storage_path si está presente
+        if (storagePath.includes('/')) {
+            const parts = storagePath.split('/');
+            bucket = parts[0];
+            path = parts.slice(1).join('/');
+        }
+
+        const { data: signed, error: signError } = await supabase.storage.from(bucket).createSignedUrl(path, 3600);
+
+        if (signError || !signed?.signedUrl) {
+          console.error("❌ Error de Supabase al generar URL firmada:", signError || "URL vacía");
+          // Fallback a URL pública para que el Jefe nunca se quede sin el archivo
+          const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(path);
+          if (publicData?.publicUrl) {
+              await sendSmartMessage(senderId, platform, `Aquí tiene el documento solicitado:`, publicData.publicUrl);
+          } else {
+              await sendSmartMessage(senderId, platform, `⚠️ Encontré el archivo, pero el sistema de seguridad bloqueó la generación del enlace de descarga.`);
+          }
+        } else {
+          await sendSmartMessage(senderId, platform, `Aquí tiene el archivo solicitado:`, signed.signedUrl);
+        }
+      } else {
+        let msg = `No encontré ningún documento`;
+        if (docTypeQuery) msg += ` de tipo "${docTypeQuery}"`;
+        if (clientQuery) msg += ` para "${clientQuery}"`;
+        await sendSmartMessage(senderId, platform, msg + ".");
+      }
+      return quietResponse();
+    }
+
+    // 8. Análisis Global y Gestión Intelectual
+    if (ai.intent === "ANALISIS_GLOBAL" || ai.intent === "INVESTIGAR_LEAD" || ai.intent === "GESTION_CALENDARIO") {
+      if (ai.intent === "ANALISIS_GLOBAL" || ai.intent === "INVESTIGAR_LEAD") {
+        const devPrompt = `El Jefe Supremo necesita un trabajo profundo. Solicitud: "${incomingMessage}". Redacta esto con tono corporativo impecable y alta precisión.`;
+        const complexRes = await model.generateContent(devPrompt);
+        await sendSmartMessage(senderId, platform, complexRes.response.text());
+        return quietResponse();
+      }
+      
+      if (ai.intent === "GESTION_CALENDARIO" && ai.execute_action) {
+        await sendSmartMessage(senderId, platform, `✅ Jefe, he agendado: "${ai.calendar_data?.title}" para ${ai.calendar_data?.date_time}.`);
+        return quietResponse();
       }
     }
 
-    // ==========================================
-    // 🔎 INVESTIGAR LEAD EXTERNO (Análisis de Mercado)
-    // ==========================================
-    if (ai.intent === "INVESTIGAR_LEAD") {
-      const leadPrompt = `Actúa como COO de Fresh Food Panamá. El Jefe Supremo (Freddy) quiere que investigues a la empresa o mercado: "${incomingMessage}". 
-      Proporciona un análisis ejecutivo B2B: ¿Qué hacen? ¿Son relevantes para agro-exportación? ¿Qué riesgos o perfil tienen? Si no tienes datos exactos, dale un análisis del mercado de ese país para exportar fruta fresca.`;
-      
-      const researchResponse = await model.generateContent(leadPrompt);
-      await sendTwilioMessage(dbSenderFormat, `🔎 *Análisis de Lead/Mercado solicitado:*\n\n${researchResponse.response.text()}`);
-      return quietResponse();
+    if (!skipGemini && ai.chat_response) {
+       await sendSmartMessage(senderId, platform, ai.chat_response);
     }
-    
-    // --- RESPUESTA GENERAL (CHAT) ---
-    await sendTwilioMessage(dbSenderFormat, ai.chat_response || "Entendido.");
     return quietResponse();
 
-  } catch (error: any) {
-    console.error("❌ ERROR ATLAS:", error.message);
-    const quietResponse = () => ({ statusCode: 200, headers: { "Content-Type": "text/xml" }, body: `<Response></Response>` });
+  } catch (error) {
+    console.error("❌ ERROR CRÍTICO ATLAS:", error);
     return quietResponse();
   }
 };

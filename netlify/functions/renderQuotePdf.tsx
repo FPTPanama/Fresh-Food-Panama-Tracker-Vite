@@ -100,11 +100,13 @@ const PdfTemplate = ({ data, company, brandDir }: { data: any, company: any, bra
     return d.toLocaleDateString('es-PA', { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
+  // Recuperamos las líneas dinámicas generadas en el cotizador
+  const quoteItems = data.totals?.items || [];
+
   return (
     <Document title={`Cotizacion_${data.quote_number}`}>
       <Page size="LETTER" style={styles.page}>
         
-        {/* HEADER REDISEÑADO: Logo y Empresa lado a lado */}
         <View style={styles.header}>
           <View style={styles.headerLeft}>
             <Image src={path.join(brandDir, 'freshfood_logo.png')} style={styles.logo} />
@@ -130,7 +132,6 @@ const PdfTemplate = ({ data, company, brandDir }: { data: any, company: any, bra
           </View>
         </View>
 
-        {/* CLIENTE Y TÉRMINOS */}
         <View style={styles.gridContainer}>
           <View style={styles.gridCol}>
             <Text style={styles.sectionLabel}>Consignatario / Importador</Text>
@@ -160,7 +161,6 @@ const PdfTemplate = ({ data, company, brandDir }: { data: any, company: any, bra
           </View>
         </View>
 
-        {/* ESPECIFICACIONES TÉCNICAS */}
         <Text style={styles.sectionLabel}>Especificaciones de Calidad y Carga</Text>
         <View style={styles.techGrid}>
           <View style={[styles.techItem, { flex: 1.2 }]}>
@@ -185,24 +185,44 @@ const PdfTemplate = ({ data, company, brandDir }: { data: any, company: any, bra
           </View>
         </View>
 
-        {/* TABLA DE PRODUCTOS */}
+        {/* TABLA DE PRODUCTOS Y RECARGOS (RENDERIZADO DINÁMICO) */}
         <View style={styles.tableHeader}>
-          <Text style={[styles.th, { flex: 2.5 }]}>Descripción del Producto</Text>
-          <Text style={[styles.th, { flex: 0.8, textAlign: 'center' }]}>Cajas</Text>
-          <Text style={[styles.th, { flex: 1.2, textAlign: 'right' }]}>Precio Unit. ({incoterm})</Text>
+          <Text style={[styles.th, { flex: 2.5 }]}>Concepto / Servicio</Text>
+          <Text style={[styles.th, { flex: 0.8, textAlign: 'center' }]}>Cant.</Text>
+          <Text style={[styles.th, { flex: 1.2, textAlign: 'right' }]}>Precio Unit.</Text>
           <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>Subtotal (USD)</Text>
         </View>
-        <View style={styles.tableRow}>
-          <View style={{ flex: 2.5 }}><Text style={styles.prodName}>{productLabel}</Text></View>
-          <Text style={{ flex: 0.8, textAlign: 'center' }}>{totalBoxes}</Text>
-          <Text style={{ flex: 1.2, textAlign: 'right' }}>$ {unitPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
-          <Text style={{ flex: 1.5, textAlign: 'right', fontWeight: 'bold', color: COLORS.PRIMARY }}>$ {Number(finalTotal).toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text>
-        </View>
 
-        {/* FOOTER */}
+        {quoteItems.length > 0 ? (
+          /* Mapeo dinámico de todas las líneas que tengan un total > 0 */
+          quoteItems.map((item: any, index: number) => (
+            <View key={index} style={styles.tableRow}>
+              <View style={{ flex: 2.5 }}>
+                <Text style={styles.prodName}>{item.name}</Text>
+              </View>
+              <Text style={{ flex: 0.8, textAlign: 'center' }}>
+                {item.qty || 1}
+              </Text>
+              <Text style={{ flex: 1.2, textAlign: 'right' }}>
+                $ {Number(item.unit || item.total || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </Text>
+              <Text style={{ flex: 1.5, textAlign: 'right', fontWeight: 'bold', color: COLORS.PRIMARY }}>
+                $ {Number(item.totalRow || item.total || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </Text>
+            </View>
+          ))
+        ) : (
+          /* Fallback para cotizaciones antiguas que no tienen el array de items guardado */
+          <View style={styles.tableRow}>
+            <View style={{ flex: 2.5 }}><Text style={styles.prodName}>{productLabel}</Text></View>
+            <Text style={{ flex: 0.8, textAlign: 'center' }}>{totalBoxes}</Text>
+            <Text style={{ flex: 1.2, textAlign: 'right' }}>$ {unitPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+            <Text style={{ flex: 1.5, textAlign: 'right', fontWeight: 'bold', color: COLORS.PRIMARY }}>$ {Number(finalTotal).toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text>
+          </View>
+        )}
+
         <View style={styles.footerSection}>
           <View style={styles.footerTop}>
-            
             <View style={styles.infoBlocksContainer}>
               <View style={styles.bankBox}>
                 <Text style={styles.bankTitle}>Instrucciones de Pago (Transferencia Bancaria)</Text>

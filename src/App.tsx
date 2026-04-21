@@ -6,6 +6,9 @@ import { LanguageProvider } from "@/lib/uiLanguage";
 import CompanyProfile from "./pages/admin/CompanyProfile";
 import MessageCenter from './pages/admin/MessageCenter';
 import AutomationsIndex from '@/pages/admin/automations';
+// Agrega estas líneas junto a tus otros imports de admin
+import AdminInvoiceList from './pages/admin/invoices/index';
+import AdminInvoiceDetail from './pages/admin/invoices/[id]';
 
 
 
@@ -171,6 +174,8 @@ export default function App() {
             {/* Rutas Admin */}
             {/* Rutas Admin */}
             <Route path="/admin/dashboard" element={<ProtectedRoute requiredRole="admin"><AdminDashboard /></ProtectedRoute>} />
+            <Route path="/admin/invoices" element={<ProtectedRoute requiredRole="admin"><AdminInvoiceList /></ProtectedRoute>} />
+            <Route path="/admin/invoices/:id" element={<ProtectedRoute requiredRole="admin"><AdminInvoiceDetail /></ProtectedRoute>} />
             <Route path="/admin/shipments" element={<ProtectedRoute requiredRole="admin"><AdminShipmentsIndex /></ProtectedRoute>} />
             <Route path="/admin/shipments/:id" element={<ProtectedRoute requiredRole="admin"><AdminShipmentDetail /></ProtectedRoute>} />
             <Route path="/admin/quotes" element={<ProtectedRoute requiredRole="admin"><AdminQuotesIndex /></ProtectedRoute>} />
