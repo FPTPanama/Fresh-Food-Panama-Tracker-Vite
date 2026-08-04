@@ -5,7 +5,6 @@ const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SE
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 export const handler = async (event: any) => {
-  // Manejo estricto de CORS para evitar errores 500 silenciosos
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
@@ -24,117 +23,117 @@ export const handler = async (event: any) => {
 
     // Identificamos el producto
     const productTarget = (lead.interested_in && lead.interested_in[0]) || 'Piña Premium';
-    const isPineapple = productTarget.toLowerCase().includes('piña');
+    const isPineapple = productTarget.toLowerCase().includes('piña') || productTarget.toLowerCase().includes('pineapple');
 
     // 2. Obtener datos de la Empresa
-    const { data: biz } = await supabase
-      .from('product_settings')
-      .select('*')
-      .ilike('product_name', `%${productTarget}%`)
-      .single();
-
+    const { data: biz } = await supabase.from('product_settings').select('*').ilike('product_name', `%${productTarget}%`).single();
     if (!biz) throw new Error(`Sin configuración para: ${productTarget}`);
 
-    // Usamos el modelo 2.5-flash por estabilidad, puedes cambiar a 3.1-flash-lite-preview si prefieres
     const model = genAI.getGenerativeModel({ model: "gemini-3.1-flash-lite-preview" });
 
-    // 3. Lógica Lingüística (Leyendo la columna correcta de Supabase)
-    const lang = lead.preferred_language === 'en' ? 'INGLÉS (English)' : 'ESPAÑOL';
+    // 3. 🚀 FIX: Lógica Bilingüe Inteligente y Limpieza de Nombre
+    // Si no es explícitamente español ('es'), usamos Inglés por defecto para el mercado internacional.
+    const isSpanish = lead.preferred_language === 'es';
+    const lang = isSpanish ? 'ESPAÑOL' : 'INGLÉS (Professional English)';
     
-    const culturalContext = lang === 'ESPAÑOL' 
-      ? "Usa 'Ustedes'. Prohibido el 'vosotros/vuestro'. Tono profesional latinoamericano." 
-      : "High-level B2B professional English. Use 'You' (formal). Direct and clear value proposition.";
+    // Limpiamos los sufijos corporativos (Alemania, España, etc.)
+    const cleanName = lead.company_name.replace(/,?\s*(GmbH & Co\. KG|GmbH|AG|KG|S\.L\.|S\.A\.|S\.A\.U\.|S\.L\.U\.|S\.L\. UNIPERSONAL)$/i, '');
 
-    // 4. Estrategias Dinámicas
+    const culturalContext = isSpanish 
+      ? "Usa 'Ustedes'. Tono profesional, directo y orientado a resultados." 
+      : "German/European B2B style: Highly professional, fact-based, no fluff, direct to the point. Use formal 'You'.";
+
+    // 4. 🚀 FIX: Estrategias Inyectadas con Datos Duros
+    const hardFacts = isPineapple 
+      ? "MENCIONA ESTOS DATOS: Certificación Global G.A.P. y FDA, Calibres 5-6, Color 2.5-3, Brix >13, y logística aérea en 48 horas a Europa."
+      : "";
+
     const strategies: Record<string, string> = {
-      intro: `Enfoque: Calidad Boutique y Origen. 
-              Menciona: Producto cosechado bajo demanda para máxima frescura.
-              Diferencial: Calidad premium de exportación vs. fruta de volumen masivo de otros orígenes.`,
+      intro: `Enfoque: Presentación de capacidad exportadora directa.
+              Meta: Solicitar una reunión breve para mostrar tarifas.
+              ${hardFacts}`,
       
-      vip: `Enfoque: Socio Estratégico de confianza. 
-            Resalta: Capacidad de suministro estable, cumplimiento de normativas y certificaciones: ${biz.usp_1}. 
-            Menciona: Salidas directas desde Panamá y total seriedad operativa.`,
+      vip: `Enfoque: Socio Estratégico para gran volumen. 
+            Resalta: Estabilidad de suministro y consistencia de calidad.
+            ${hardFacts}`,
       
-      seguimiento_1: `Enfoque: Tecnología y Transparencia (Fresh Connect). 
-                      Resalta: La capacidad de monitorear el embarque en vivo por nuestra plataforma propia. 
-                      Valor: Seguridad total en la recepción y logística.`,
+      seguimiento_1: `Enfoque: Trazabilidad y Tecnología.
+                      MENCIONA ESTO EXACTAMENTE: Nuestro protocolo "FreshConnect", que permite acceso a documentos de embarque en vivo e inspección visual desde origen.`,
       
-      seguimiento_2: `Enfoque: Invitación a Prueba Piloto. 
-                      Resalta: Propuesta de coordinar un envío de prueba (Trial order) para validar la calidad. 
-                      Detalle: Enfoque en la consistencia del producto y calibres de exportación.`
+      seguimiento_2: `Enfoque: Envío de prueba (Trial order).
+                      Meta: Proponer un palet de prueba vía aérea para que validen la calidad (color y brix) por sí mismos.`
     };
     const currentStrategy = strategies[emailType] || strategies['intro'];
 
-    // 5. Prompt Maestro con Reglas Estrictas
+    // 5. Prompt Maestro Blindado
     const prompt = `
-      Eres un vendedor B2B francotirador. Vas a redactar un correo de venta directa a ${lead.company_name} en ${lead.city}.
+      Eres un director comercial B2B de alto nivel. Vas a redactar un correo a ${cleanName} en ${lead.city}.
 
       REGLA DE IDIOMA: Redacta TODO el correo estrictamente en ${lang}.
 
-      CONTEXTO DEL NEGOCIO:
-      - Empresa: ${biz.company_name} (website: ${biz.website}).
-      - Producto: ${biz.product_name}.
-      - Ventajas: ${biz.usp_1} | ${biz.usp_2}.
-      - Logística: Salidas desde Tocumen (PTY), Panamá.
-      ${isPineapple ? '- Tiempo: <48h desde cosecha al aeropuerto.' : '- Tiempos optimizados de cadena de frío.'}
+      CONTEXTO:
+      - Empresa remitente: Fresh Food Panamá.
+      - Producto: ${productTarget}.
 
-      OFERTA:
+      ESTRATEGIA A APLICAR:
       ${currentStrategy}
 
-      REGLAS DE REDACCIÓN "ANTI-FLUFF":
-      1. LA PRIMERA LÍNEA DEBE SER EL ASUNTO: "ASUNTO: [Asunto directo y persuasivo en ${lang}]".
-      2. PROHIBIDO SALUDAR POÉTICAMENTE: Nada de "I hope this finds you well". Inicia directamente con "Hola equipo de ${lead.company_name}," y ve al grano.
-      3. LONGITUD: Máximo 4 a 5 oraciones.
-      4. TONO: ${culturalContext}. Transaccional, profesional. 
-      5. NO FIRMES: NO escribas "Sincerely", "Best regards", ni tu nombre al final.
+      REGLAS DE REDACCIÓN "ANTI-SPAM":
+      1. PRIMERA LÍNEA: Escribe solo "ASUNTO: [Tu asunto aquí]" o "SUBJECT: [Your subject here]". El asunto debe ser técnico y generar curiosidad (ej: Direct supply of Premium MD2 Pineapples).
+      2. SALUDO: Inicia directamente con "Hola equipo de ${cleanName}," o "Hello ${cleanName} team,".
+      3. ESTRUCTURA: Ve directo al grano. Máximo 4 párrafos cortos.
+      4. TONO: ${culturalContext}.
+      5. DESPEDIDA: NO escribas "Sincerely", "Best regards", ni tu nombre al final. Yo pondré la firma mediante código. Termina con la última pregunta o frase de cierre.
     `;
 
     const result = await model.generateContent(prompt);
     let rawResponse = result.response.text().trim();
 
     // 6. Separación de Asunto y Cuerpo
-    let dynamicSubject = `Oportunidad B2B - ${biz.company_name}`;
+    let dynamicSubject = isSpanish ? `Suministro B2B - ${biz.company_name}` : `B2B Supply - ${biz.company_name}`;
     let emailBody = rawResponse;
 
     const lines = rawResponse.split('\n');
-    if (lines[0].toUpperCase().includes('ASUNTO:')) {
-      dynamicSubject = lines[0].replace(/ASUNTO:/i, '').trim();
-      emailBody = lines.slice(1).join('\n').trim();
-    } else if (lines[0].toUpperCase().includes('SUBJECT:')) {
-      dynamicSubject = lines[0].replace(/SUBJECT:/i, '').trim();
+    if (lines[0].toUpperCase().includes('ASUNTO:') || lines[0].toUpperCase().includes('SUBJECT:')) {
+      dynamicSubject = lines[0].replace(/ASUNTO:|SUBJECT:/i, '').trim();
       emailBody = lines.slice(1).join('\n').trim();
     }
 
-    // Filtro Anti-IA
-    emailBody = emailBody.replace(/(Sincerely|Best regards|Regards|Atentamente|Saludos cordiales|Un saludo|Thank you|Gracias por su atención)[\s\S]*/gi, '').trim();
+    // Limpieza de despedidas huérfanas de la IA
+    emailBody = emailBody.replace(/(Sincerely|Best regards|Kind regards|Regards|Atentamente|Saludos cordiales|Un saludo)[\s\S]*/gi, '').trim();
 
-    // 7. Envoltura Spam-Proof
-    const plainTextSignature = `\n\n--\n${biz.sender_name}\nDirector de Exportaciones | ${biz.company_name}\nWhatsApp: +507 6000-0000\nWeb: ${biz.website}\n\n---\nEste es un correo comercial B2B. Si deseas dejar de recibir nuestras alertas, responde "Baja".`;
-    const finalPlainText = emailBody + plainTextSignature;
+    // 7. 🚀 FIX: Firma y Disclaimer Bilingües
+    const role = isSpanish ? "Director de Exportaciones" : "Export Director";
+    const optOutText = isSpanish 
+      ? "Este es un correo comercial. Si deseas dejar de recibir nuestras actualizaciones, responde 'Baja'." 
+      : "This is a commercial email. If you prefer not to receive further updates, simply reply 'Opt-out'.";
+
+    const finalPlainText = `${emailBody}\n\n--\nFreddy García\n${role} | Fresh Food Panamá C.A.\nWhatsApp: +507 6303-6338\nWeb: www.freshfoodpanama.com\n\n---\n${optOutText}`;
 
     const htmlBody = emailBody.replace(/\n/g, '<br>');
     const emailHtml = `
-      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14px; color: #1e293b; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.5; max-width: 600px; margin: 0 auto; padding: 20px;">
         ${htmlBody}
-        <br><br>--<br>
-        <strong>${biz.sender_name}</strong><br>
-        Director de Exportaciones | ${biz.company_name}<br>
-        WhatsApp: +507 6303-6338<br>
-        <a href="${biz.website}" style="color: #d17711; text-decoration: none;">${biz.website}</a>
-        <hr style="border: none; border-top: 1px solid #e2e8f0; margin-top: 30px; margin-bottom: 20px;" />
-        <p style="font-size: 11px; color: #94a3b8; text-align: center; line-height: 1.4;">
-          Este es un correo comercial operativo. Si no eres la persona adecuada en compras o deseas dejar de recibir nuestras actualizaciones de disponibilidad, simplemente responde a este correo con la palabra <strong>"Baja"</strong>.
+        <br><br>
+        <p>
+          <strong>Freddy García</strong><br>
+          ${role} | Fresh Food Panamá C.A.<br>
+          WhatsApp: +507 6303-6338<br>
+          <a href="https://www.freshfoodpanama.com" style="color: #1b5e20; text-decoration: none; font-weight: bold;">www.freshfoodpanama.com</a>
+        </p>
+        <hr style="border: none; border-top: 1px solid #eee; margin-top: 30px; margin-bottom: 20px;" />
+        <p style="font-size: 11px; color: #999; text-align: justify; line-height: 1.4;">
+          ${optOutText}
         </p>
       </div>
     `;
 
-    // 8. Guardar en Supabase (Guardamos la versión HTML formateada)
+    // 8. Guardar en Supabase
     await supabase.from('leads_prospecting').update({ 
       email_draft: emailHtml,
       last_email_type: emailType 
     }).eq('id', leadId);
 
-    // Devolvemos toda la información útil al frontend
     return { 
       statusCode: 200, 
       headers,
@@ -149,7 +148,7 @@ export const handler = async (event: any) => {
     console.error("Error en Generator:", err.message);
     return { 
       statusCode: 500, 
-      headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ error: err.message }) 
     };
   }

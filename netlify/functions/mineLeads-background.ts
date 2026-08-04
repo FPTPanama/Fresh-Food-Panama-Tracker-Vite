@@ -1,103 +1,162 @@
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import axios from 'axios';
+import dns from 'dns';
+import { promisify } from 'util';
 
+const resolveMx = promisify(dns.resolveMx);
 const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+const QUICK_EMAIL_API_KEY = process.env.QUICK_EMAIL_API_KEY; 
+
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// --- 🛡️ PIPELINE DE VERIFICACIÓN HÍBRIDO ---
+async function verifyWebsite(url: string): Promise<boolean> {
+  if (!url || url === 'null') return false;
+  try {
+    const target = url.startsWith('http') ? url : `https://${url}`;
+    const res = await axios.head(target, { timeout: 5000 }); 
+    return res.status >= 200 && res.status < 400;
+  } catch (e) { return false; }
+}
+
+async function hasMailServer(email: string): Promise<boolean> {
+  if (!email || !email.includes('@')) return false;
+  const domain = email.split('@')[1];
+  try {
+    const mxRecords = await resolveMx(domain);
+    return mxRecords && mxRecords.length > 0;
+  } catch { return false; }
+}
+
+async function verifyEmailDeep(email: string): Promise<boolean> {
+  if (!email || !QUICK_EMAIL_API_KEY) return true; 
+  try {
+    const res = await axios.get(`https://api.quickemailverification.com/v1/verify?email=${email}&apikey=${QUICK_EMAIL_API_KEY}`);
+    return res.data.result === 'valid' || res.data.result === 'unknown';
+  } catch (e) { return true; }
+}
 
 export const handler = async (event: any) => {
   let location = "Mercamadrid, España";
   let product = "Piña Premium"; 
   
-  // Manejo seguro del body para Netlify
   if (event.body) {
     try {
       const payload = event.isBase64Encoded ? Buffer.from(event.body, 'base64').toString('utf8') : event.body;
       const body = JSON.parse(payload);
       if (body.location) location = body.location;
       if (body.product) product = body.product;
-    } catch (e) {
-      console.log("No body provided or invalid JSON, using defaults");
-    }
+    } catch (e) { console.log("Using defaults"); }
   }
 
-  // CONFIGURACIÓN DE MICRO-LOTES
-  const TOTAL_BATCHES = 7; // 7 iteraciones
-  const LEADS_PER_BATCH = 3; // 3 leads por iteración (Total esperado: 21 leads)
-
-  console.log(`🤖 Iniciando minado de ALTA PRECISIÓN en Micro-Lotes (${TOTAL_BATCHES}x${LEADS_PER_BATCH}) para ${product} en ${location}...`);
+  const TOTAL_BATCHES = 7; 
+  const LEADS_PER_BATCH = 3; 
 
   try {
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-3.1-flash-lite-preview",
+      model: "gemini-3.1-flash-lite-preview", 
       generationConfig: { responseMimeType: "application/json" }
     });
     
-    // 1. Obtener Blacklist inicial de la base de datos (ampliamos el límite para no repetir nunca)
     const { data: existing } = await supabase.from('leads_prospecting').select('company_name').limit(1500);
     let currentBlacklist = existing?.map(e => e.company_name) || [];
-    
     let allLeads: any[] = [];
 
-    // 2. EJECUCIÓN DEL BUCLE DE MICRO-LOTES
+    // BUCLE DE MICRO-LOTES CON GOTEO
     for (let lote = 1; lote <= TOTAL_BATCHES; lote++) {
-      console.log(`⏳ Procesando Micro-Lote ${lote} de ${TOTAL_BATCHES}...`);
-      
+      console.log(`⏳ Lote ${lote}/${TOTAL_BATCHES}...`);
       const blacklistStr = currentBlacklist.length > 0 ? currentBlacklist.join(', ') : 'Ninguna';
       
-      // Pedimos SOLO 3 leads para máxima calidad y evitar cortes
-      const prompt = `
-        Actúa como un analista de mercado B2B experto en el sector agrícola.
-        Identifica EXACTAMENTE ${LEADS_PER_BATCH} empresas reales en ${location} que importen o distribuyan ${product}.
-        EXCLUYE estrictamente estas empresas: [${blacklistStr}].
-        
-        REGLAS DE FORMATO (Devuelve ÚNICAMENTE JSON VÁLIDO):
-        1. country_code: Código ISO 3166-1 alpha-2 (ej: 'ES').
-        2. tags: Array con 3 etiquetas de operación (ej: ["Mayorista", "Importador", "Retail"]).
-        3. ai_analysis: Una frase de máximo 15 palabras sobre su potencial.
-        
-        Estructura JSON requerida: [{company_name, city, country, country_code, website, contact_email, contact_phone, company_size, tags, ai_analysis, lead_score}]
-      `;
+      const prompt = `Actúa como analista B2B. Encuentra EXACTAMENTE ${LEADS_PER_BATCH} empresas REALES en ${location} para ${product}.
+      EXCLUYE: [${blacklistStr}].
+      REGLAS:
+      1. PROHIBIDO INVENTAR. Si no sabes el email o web, devuelve null.
+      2. Solo empresas con presencia digital verificable.
+      3. Estructura JSON: [{company_name, city, country, country_code, website, contact_email, contact_phone, company_size, tags, ai_analysis, lead_score}]`;
 
-      const result = await model.generateContent(prompt);
-      const text = result.response.text();
-      
+      let text = "";
+      let retries = 2;
+      while (retries > 0) {
+        try {
+          const result = await model.generateContent(prompt);
+          text = result.response.text();
+          break; 
+        } catch (apiError: any) {
+          if (apiError.message && (apiError.message.includes('429') || apiError.message.includes('503'))) {
+            await delay(20000);
+            retries--;
+          } else {
+            throw apiError;
+          }
+        }
+      }
+
+      if (!text) continue;
+
       try {
         const batchLeads = JSON.parse(text);
         allLeads = [...allLeads, ...batchLeads];
-        
-        // Alimentamos el blacklist para la siguiente vuelta del bucle
-        const newNames = batchLeads.map((l: any) => l.company_name);
-        currentBlacklist = [...currentBlacklist, ...newNames];
-        
-        console.log(`✅ Lote ${lote} extraído con éxito (${batchLeads.length} leads). Acumulados: ${allLeads.length}`);
-      } catch (parseError) {
-        console.error(`❌ Error al leer JSON en el Lote ${lote}. Posible microcorte de Google.`);
-        // Si hay un fallo de red o de Google, rompemos el bucle PERO salvamos todo lo acumulado hasta ahora.
-        if (allLeads.length === 0) throw new Error("Fallo desde el primer lote, JSON truncado");
-        else break;
-      }
+        currentBlacklist = [...currentBlacklist, ...batchLeads.map((l: any) => l.company_name)];
+      } catch (e) { console.error("Error parseando JSON"); }
+      
+      if (lote < TOTAL_BATCHES) await delay(15000);
     }
 
-    if (allLeads.length === 0) throw new Error("No se pudo extraer ningún lead válido.");
+    console.log(`🧐 Verificando ${allLeads.length} prospectos...`);
+    const verifiedLeads = [];
 
-    // 3. Formateo e Inserción Masiva
-    const formattedLeads = allLeads.map((l: any) => ({ 
-      ...l, 
-      status: 'new',
-      pipeline_stage: 'inbox',
-      interested_in: [product], 
-      source: 'ai-cron', 
-      created_at: new Date().toISOString()
-    }));
+    for (const lead of allLeads) {
+      const isWebAlive = await verifyWebsite(lead.website);
+      if (!isWebAlive) {
+        console.warn(`🗑️ Descartado (Web Down): ${lead.company_name}`);
+        continue;
+      }
 
-    const { error } = await supabase.from('leads_prospecting').insert(formattedLeads);
+      let emailFinal = lead.contact_email;
+      if (emailFinal) {
+        const hasMX = await hasMailServer(emailFinal);
+        if (!hasMX) {
+          console.warn(`📧 Email falso (DNS fail): ${emailFinal}`);
+          emailFinal = null; 
+        } else {
+          const isDeepValid = await verifyEmailDeep(emailFinal);
+          if (!isDeepValid) {
+            console.warn(`🚫 Email rechazado por API: ${emailFinal}`);
+            emailFinal = null;
+          }
+        }
+      }
+
+      verifiedLeads.push({
+        ...lead,
+        contact_email: emailFinal,
+        lead_score: lead.lead_score ? Number(lead.lead_score) : 0,
+        // 🚀 FIX CRÍTICO: Guardamos el status como 'new' para que Supabase lo acepte
+        status: 'new',
+        pipeline_stage: 'inbox',
+        interested_in: [product], 
+        source: 'ai-cron-verified',
+        created_at: new Date().toISOString()
+      });
+    }
+
+    if (verifiedLeads.length === 0) throw new Error("Cero leads pasaron la verificación.");
+
+    // GUARDADO FINAL
+    const { error } = await supabase.from('leads_prospecting').upsert(verifiedLeads, {
+      onConflict: 'company_name,city',
+      ignoreDuplicates: true 
+    });
+
     if (error) throw error;
     
-    console.log(`🚀 ÉXITO TOTAL: Se han minado e insertado ${allLeads.length} leads de alta precisión correctamente.`);
+    console.log(`🚀 ÉXITO: ${verifiedLeads.length} leads blindados guardados.`);
     return { statusCode: 200 };
 
   } catch (err: any) {
-    console.error("❌ Error crítico en mineLeads-background:", err.message);
+    console.error("❌ Error:", err.message);
     return { statusCode: 500 };
   }
 };
